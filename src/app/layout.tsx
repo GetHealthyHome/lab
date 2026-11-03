@@ -8,11 +8,11 @@ export const metadata: Metadata = {
   title: "Lab Tool Tracker",
   description: "Scan, check out, and find every tool in the hands-on lab.",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Tools" },
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "Tools" },
   icons: { apple: "/icons/icon-192.png" },
 };
 
-export const viewport: Viewport = { themeColor: "#0b0f14", width: "device-width", initialScale: 1, maximumScale: 1 };
+export const viewport: Viewport = { themeColor: "#166534", width: "device-width", initialScale: 1, maximumScale: 1 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

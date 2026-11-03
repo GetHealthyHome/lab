@@ -38,7 +38,7 @@ export default async function AdminPage() {
 
       <section className="card flex flex-col gap-3">
         <h2 className="text-xl font-bold">Add a storage location</h2>
-        <p className="text-slate-400">Print a QR sticker whose value is the code. Nest drawers under toolboxes, carts under lockers.</p>
+        <p className="text-gray-600">Print a QR sticker whose value is the code. Nest drawers under toolboxes, carts under lockers.</p>
         <form action={addLocation} className="grid gap-2 md:grid-cols-3">
           <input className="input" name="name" placeholder="Name (e.g. Drawer 3)" required />
           <input className="input" name="code" placeholder="Label code (e.g. LOC-TB1-D3)" required />
@@ -49,29 +49,31 @@ export default async function AdminPage() {
 
       <section className="card flex flex-col gap-3">
         <h2 className="text-xl font-bold">Add a person</h2>
-        <form action={addPerson} className="grid gap-2 md:grid-cols-4">
+        <p className="text-gray-600">Fill in a temporary password to give them a login; they must change it the first time they sign in. Leave it blank for students who only borrow tools.</p>
+        <form action={addPerson} className="grid gap-2 md:grid-cols-3">
           <input className="input" name="name" placeholder="Full name" required />
           <select className="input" name="role"><option value="student">Student</option><option value="trainer">Trainer</option><option value="admin">Admin</option></select>
-          <input className="input" name="email" type="email" placeholder="Email (needed for trainer/admin login + reports)" />
           <input className="input" name="badge_code" placeholder="Badge barcode" />
-          <button className="btn btn-primary md:col-span-4">Add</button>
+          <input className="input" name="email" type="email" placeholder="Email (login + reports)" />
+          <input className="input" name="password" type="text" autoComplete="off" minLength={8} placeholder="Temporary password (8+ chars)" />
+          <button className="btn btn-primary">Add</button>
         </form>
       </section>
 
       <section className="card">
         <h2 className="text-xl font-bold mb-2">Inventory ({assets?.length ?? 0})</h2>
         <table className="w-full text-left">
-          <thead className="text-slate-400"><tr><th>Tool</th><th>Status</th><th>Holder / Location</th><th>Code</th><th></th></tr></thead>
+          <thead className="text-gray-600"><tr><th>Tool</th><th>Status</th><th>Holder / Location</th><th>Code</th><th></th></tr></thead>
           <tbody>
             {assets?.map((a) => (
-              <tr key={a.id} className="border-t border-slate-800">
+              <tr key={a.id} className="border-t border-green-200">
                 <td className="py-2"><Link href={`/assets/${a.id}`}>{a.kit_id ? "↳ " : ""}{a.name}</Link></td>
                 <td>{a.status.replace("_", " ")}</td>
-                <td className="text-slate-400">{a.holder?.name ?? a.location?.name ?? "—"}</td>
-                <td className="font-mono text-slate-400">{a.barcode ?? ""}</td>
+                <td className="text-gray-600">{a.holder?.name ?? a.location?.name ?? "—"}</td>
+                <td className="font-mono text-gray-600">{a.barcode ?? ""}</td>
                 <td className="text-right">
-                  {a.status !== "available" && <form action={setAssetStatus.bind(null, a.id, "available")}><button className="text-emerald-400">mark available</button></form>}
-                  {a.status === "available" && <form action={setAssetStatus.bind(null, a.id, "lost")}><button className="text-red-400">mark lost</button></form>}
+                  {a.status !== "available" && <form action={setAssetStatus.bind(null, a.id, "available")}><button className="text-green-700">mark available</button></form>}
+                  {a.status === "available" && <form action={setAssetStatus.bind(null, a.id, "lost")}><button className="text-red-600">mark lost</button></form>}
                 </td>
               </tr>
             ))}
@@ -81,11 +83,11 @@ export default async function AdminPage() {
 
       <section className="card">
         <h2 className="text-xl font-bold mb-2">Locations</h2>
-        <ul>{locations?.map((l) => <li key={l.id} className="py-1">{path(l.id)} <span className="font-mono text-slate-400">{l.code}</span></li>)}</ul>
+        <ul>{locations?.map((l) => <li key={l.id} className="py-1">{path(l.id)} <span className="font-mono text-gray-600">{l.code}</span></li>)}</ul>
       </section>
       <section className="card">
         <h2 className="text-xl font-bold mb-2">People</h2>
-        <ul>{people?.map((p) => <li key={p.id} className="py-1">{p.name} <span className="text-slate-400">· {p.role}{p.email ? ` · ${p.email}` : ""}{p.badge_code ? ` · badge ${p.badge_code}` : ""}</span></li>)}</ul>
+        <ul>{people?.map((p) => <li key={p.id} className="py-1">{p.name} <span className="text-gray-600">· {p.role}{p.auth_user_id ? " · has login" : ""}{p.email ? ` · ${p.email}` : ""}{p.badge_code ? ` · badge ${p.badge_code}` : ""}</span></li>)}</ul>
       </section>
     </div>
   );

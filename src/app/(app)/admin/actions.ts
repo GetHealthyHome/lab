@@ -24,8 +24,23 @@ export async function addLocation(f: FormData) {
 
 export async function addPerson(f: FormData) {
   const sb = await createClient();
-  const { error } = await sb.from("people").insert({ name: str(f, "name")!, role: str(f, "role") ?? "student", email: str(f, "email"), badge_code: str(f, "badge_code") });
-  if (error) throw new Error(error.message);
+  const name = str(f, "name")!, role = str(f, "role") ?? "student", email = str(f, "email"), password = str(f, "password");
+  if (password) {
+    // A login: created by the admin-create-user edge function (holds the service-role key) with a temporary password.
+    if (!email) throw new Error("A login needs an email address");
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-create-user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ name, email, role, password }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `Could not create login (${res.status})`);
+    // the auth trigger inserted/updated the people row; just attach the badge if given
+    if (str(f, "badge_code")) await sb.from("people").update({ badge_code: str(f, "badge_code") }).eq("email", email);
+  } else {
+    const { error } = await sb.from("people").insert({ name, role, email, badge_code: str(f, "badge_code") });
+    if (error) throw new Error(error.message);
+  }
   revalidatePath("/admin");
 }
 

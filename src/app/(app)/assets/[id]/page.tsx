@@ -16,20 +16,20 @@ export default async function AssetPage({ params }: PageProps<"/assets/[id]">) {
     <>
       <div className="card">
         <h1 className="text-3xl font-black">{asset.name}</h1>
-        <p className="text-slate-300 text-lg mt-1">
-          <span className={`badge ${out ? "bg-amber-500 text-black" : asset.status === "available" ? "bg-emerald-600" : "bg-red-600"}`}>{asset.status.replace("_", " ")}</span>
+        <p className="text-gray-700 text-lg mt-1">
+          <span className={`badge ${out ? "bg-orange-500 text-white" : asset.status === "available" ? "bg-green-700 text-white" : "bg-red-600"}`}>{asset.status.replace("_", " ")}</span>
           {" "}· {asset.kind.replace("_", " ")} · condition {asset.condition}
         </p>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 mt-3 text-lg">
-          <dt className="text-slate-400">Holder</dt><dd>{asset.holder?.name ?? "—"}</dd>
-          <dt className="text-slate-400">Location</dt><dd>{asset.location?.name ?? "—"}</dd>
-          <dt className="text-slate-400">Home bin</dt><dd>{asset.home?.name ?? "—"}</dd>
-          <dt className="text-slate-400">Due</dt><dd>{asset.due_at ? new Date(asset.due_at).toLocaleString() : "—"}</dd>
-          <dt className="text-slate-400">Barcode</dt><dd className="font-mono">{asset.barcode ?? "—"}</dd>
-          <dt className="text-slate-400">Serial</dt><dd className="font-mono">{asset.serial ?? "—"}</dd>
-          {asset.quantity > 1 && <><dt className="text-slate-400">Quantity</dt><dd>{asset.quantity}</dd></>}
+          <dt className="text-gray-600">Holder</dt><dd>{asset.holder?.name ?? "—"}</dd>
+          <dt className="text-gray-600">Location</dt><dd>{asset.location?.name ?? "—"}</dd>
+          <dt className="text-gray-600">Home bin</dt><dd>{asset.home?.name ?? "—"}</dd>
+          <dt className="text-gray-600">Due</dt><dd>{asset.due_at ? new Date(asset.due_at).toLocaleString() : "—"}</dd>
+          <dt className="text-gray-600">Barcode</dt><dd className="font-mono">{asset.barcode ?? "—"}</dd>
+          <dt className="text-gray-600">Serial</dt><dd className="font-mono">{asset.serial ?? "—"}</dd>
+          {asset.quantity > 1 && <><dt className="text-gray-600">Quantity</dt><dd>{asset.quantity}</dd></>}
         </dl>
-        {asset.notes && <p className="mt-2 text-slate-300">{asset.notes}</p>}
+        {asset.notes && <p className="mt-2 text-gray-700">{asset.notes}</p>}
       </div>
       <div className="grid grid-cols-2 gap-2">
         {out
@@ -40,19 +40,19 @@ export default async function AssetPage({ params }: PageProps<"/assets/[id]">) {
       {children && children.length > 0 && (
         <div className="card">
           <h2 className="font-bold text-xl mb-2">Kit contents</h2>
-          <ul>{children.map((c) => <li key={c.id} className="py-1 text-lg"><Link href={`/assets/${c.id}`}>{c.name}</Link> <span className="text-slate-400">· {c.status.replace("_", " ")}</span></li>)}</ul>
+          <ul>{children.map((c) => <li key={c.id} className="py-1 text-lg"><Link href={`/assets/${c.id}`}>{c.name}</Link> <span className="text-gray-600">· {c.status.replace("_", " ")}</span></li>)}</ul>
         </div>
       )}
       <div className="card">
         <h2 className="font-bold text-xl mb-2">History</h2>
         <ul className="flex flex-col gap-1">
           {history?.map((m) => (
-            <li key={m.id} className="text-slate-300">
-              <span className="text-slate-500">{new Date(m.created_at).toLocaleString()}</span> · {m.action.replace("_", " ")}
+            <li key={m.id} className="text-gray-700">
+              <span className="text-gray-500">{new Date(m.created_at).toLocaleString()}</span> · {m.action.replace("_", " ")}
               {m.person?.name ? ` · ${m.person.name}` : ""}{m.location?.name ? ` · ${m.location.name}` : ""}{m.condition ? ` · ${m.condition}` : ""}{m.note ? ` · ${m.note}` : ""}
             </li>
           ))}
-          {history?.length === 0 && <li className="text-slate-500">No activity yet.</li>}
+          {history?.length === 0 && <li className="text-gray-500">No activity yet.</li>}
         </ul>
       </div>
     </>
