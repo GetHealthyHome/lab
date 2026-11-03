@@ -6,7 +6,7 @@ export default async function ItemsPage({ searchParams }: PageProps<"/items">) {
   const { tab } = await searchParams;
   const sb = await createClient();
   const { data } = await sb.from("assets")
-    .select("id,name,kind,status,due_at,barcode,serial,photo_url,kit_id,holder:people(name),location:locations!assets_location_id_fkey(name)")
+    .select("id,name,brand,kind,status,due_at,barcode,serial,notes,photo_url,kit_id,last_checked_out_at,holder:people(name),location:locations!assets_location_id_fkey(name)")
     .order("name");
   const initial = ["available", "out", "overdue", "repair"].includes(String(tab)) ? (tab as "available") : "all";
   return (

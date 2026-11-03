@@ -34,7 +34,8 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       <section className="card flex flex-col gap-3">
         <h2 className="text-xl font-bold">Add a tool or kit</h2>
         <form action={addAsset} className="grid gap-2 md:grid-cols-2">
-          <input className="input md:col-span-2" name="name" placeholder="Name (e.g. Testo 310 combustion analyzer)" required />
+          <input className="input" name="name" placeholder="Tool name (e.g. Combustion analyzer)" required />
+          <input className="input" name="brand" placeholder="Brand (e.g. Testo)" />
           <BarcodeField />
           <select className="input" name="kind">
             <option value="individual">Individual (serial-tracked)</option>
