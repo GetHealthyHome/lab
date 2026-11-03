@@ -25,7 +25,7 @@ export default async function Home() {
             <li key={a.id}>
               <Link href={`/assets/${a.id}`} className={`card flex justify-between text-lg ${late ? "border-red-500" : ""}`}>
                 <span>{a.name}</span>
-                <span className="text-slate-400">{a.holder?.name ?? a.location?.name ?? "—"}{late ? " · LATE" : ""}</span>
+                <span className="text-gray-600">{a.holder?.name ?? a.location?.name ?? "—"}{late ? " · LATE" : ""}</span>
               </Link>
             </li>
           );

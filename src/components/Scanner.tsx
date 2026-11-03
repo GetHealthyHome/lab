@@ -32,9 +32,9 @@ export default function Scanner({ onCode, paused }: { onCode: (code: string) => 
     <div className="flex flex-col gap-3">
       <div className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3]">
         <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-        <div className="absolute inset-6 border-4 border-amber-400/70 rounded-xl pointer-events-none" />
+        <div className="absolute inset-6 border-4 border-orange-500/80 rounded-xl pointer-events-none" />
       </div>
-      {error && <p className="text-red-400">{error}. Type the code instead.</p>}
+      {error && <p className="text-red-600">{error}. Type the code instead.</p>}
       <form
         className="flex gap-2"
         onSubmit={(e) => { e.preventDefault(); if (typed.trim()) { onCode(typed.trim()); setTyped(""); } }}

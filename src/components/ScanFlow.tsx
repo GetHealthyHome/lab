@@ -96,27 +96,27 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-black">{TITLES[mode]}</h1>
-        {pending > 0 && <span className="badge bg-amber-500 text-black">{pending} waiting to sync</span>}
+        {pending > 0 && <span className="badge bg-orange-500 text-white">{pending} waiting to sync</span>}
       </div>
       <div className="flex gap-2 flex-wrap text-lg">
-        {person && <button className="badge bg-sky-600" onClick={() => setPerson(null)}>👤 {person.name} ✕</button>}
-        {bin && <button className="badge bg-emerald-600" onClick={() => setBin(null)}>📦 {bin.name} ✕</button>}
+        {person && <button className="badge bg-blue-600 text-white" onClick={() => setPerson(null)}>👤 {person.name} ✕</button>}
+        {bin && <button className="badge bg-green-700 text-white" onClick={() => setBin(null)}>📦 {bin.name} ✕</button>}
       </div>
 
       {!asset && <Scanner onCode={resolve} />}
       {!asset && mode === "checkout" && !person && !bin && snap && (
         <div className="card flex flex-col gap-2">
-          <p className="text-slate-300">Who is taking it? (or scan a badge / truck bin)</p>
+          <p className="text-gray-700">Who is taking it? (or scan a badge / truck bin)</p>
           <div className="grid grid-cols-2 gap-2">
             {snap.people.map((p) => <button key={p.id} className="btn btn-secondary" onClick={() => setPerson(p)}>{p.name}</button>)}
           </div>
         </div>
       )}
-      {!asset && mode === "audit" && !bin && <p className="card text-slate-300 text-lg">Scan the shelf or drawer label first, then scan every tool in it.</p>}
+      {!asset && mode === "audit" && !bin && <p className="card text-gray-700 text-lg">Scan the shelf or drawer label first, then scan every tool in it.</p>}
       {!asset && mode === "audit" && bin && (
         <ul className="card flex flex-col gap-1 text-lg">
           {expected.map((a) => <li key={a.id}>{seen.has(a.id) ? "✅" : "⬜"} {a.name}</li>)}
-          {expected.length === 0 && <li className="text-slate-400">Nothing is recorded in this bin yet.</li>}
+          {expected.length === 0 && <li className="text-gray-600">Nothing is recorded in this bin yet.</li>}
         </ul>
       )}
 
@@ -124,7 +124,7 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
         <div className="card flex flex-col gap-4">
           <div>
             <p className="text-2xl font-bold">{asset.name}</p>
-            <p className="text-slate-400">{asset.kind} · {asset.status.replace("_", " ")}{asset.serial ? ` · SN ${asset.serial}` : ""}</p>
+            <p className="text-gray-600">{asset.kind} · {asset.status.replace("_", " ")}{asset.serial ? ` · SN ${asset.serial}` : ""}</p>
           </div>
           {children.length > 0 && (
             <div>
@@ -157,7 +157,7 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
               ))}
             </div>
           )}
-          {mode === "checkin" && !bin && <p className="text-slate-400">Scan a shelf label after confirming to record where it went, or it returns to its home bin.</p>}
+          {mode === "checkin" && !bin && <p className="text-gray-600">Scan a shelf label after confirming to record where it went, or it returns to its home bin.</p>}
           {(mode === "damage" || condition === "damaged") && (
             <input className="input" placeholder="What is wrong?" value={note} onChange={(e) => setNote(e.target.value)} />
           )}
@@ -168,7 +168,7 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
         </div>
       )}
 
-      {toast && <div className="fixed bottom-6 left-4 right-4 rounded-2xl bg-slate-100 text-black p-4 text-xl font-bold text-center shadow-xl">{toast}</div>}
+      {toast && <div className="fixed bottom-6 left-4 right-4 rounded-2xl bg-green-800 text-white p-4 text-xl font-bold text-center shadow-xl">{toast}</div>}
     </div>
   );
 }
