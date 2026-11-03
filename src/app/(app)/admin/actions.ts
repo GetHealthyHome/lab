@@ -6,13 +6,23 @@ const str = (f: FormData, k: string) => (String(f.get(k) ?? "").trim() || null);
 
 export async function addAsset(f: FormData) {
   const sb = await createClient();
+  let photo_url: string | null = null;
+  const photo = f.get("photo");
+  if (photo instanceof File && photo.size > 0) {
+    const path = `${crypto.randomUUID()}.${photo.name.split(".").pop()?.toLowerCase() || "jpg"}`;
+    const { error } = await sb.storage.from("asset-photos").upload(path, photo, { contentType: photo.type });
+    if (error) throw new Error(`Photo upload failed: ${error.message}`);
+    photo_url = sb.storage.from("asset-photos").getPublicUrl(path).data.publicUrl;
+  }
   const { error } = await sb.from("assets").insert({
+    photo_url,
     name: str(f, "name")!, kind: str(f, "kind") ?? "individual", barcode: str(f, "barcode"), serial: str(f, "serial"),
     quantity: Number(f.get("quantity") || 1), kit_id: str(f, "kit_id"),
     home_location_id: str(f, "home_location_id"), location_id: str(f, "home_location_id"), notes: str(f, "notes"),
   });
   if (error) throw new Error(error.message);
   revalidatePath("/admin");
+  revalidatePath("/items");
 }
 
 export async function addLocation(f: FormData) {

@@ -2,11 +2,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Scanner from "@/components/Scanner";
+import { createClient } from "@/lib/supabase/client";
 import { flushOutbox, pendingCount, recordMovement, refreshSnapshot, type Snapshot } from "@/lib/offline";
 import type { Asset, Location, Person } from "@/lib/database.types";
 
-export type Mode = "checkout" | "checkin" | "lookup" | "audit" | "damage";
-const TITLES: Record<Mode, string> = { checkout: "Check out", checkin: "Check in", lookup: "Look up", audit: "Audit a bin", damage: "Flag damage" };
+export type Mode = "checkout" | "checkin" | "lookup" | "audit" | "damage" | "label";
+const TITLES: Record<Mode, string> = { checkout: "Check out", checkin: "Check in", lookup: "Look up", audit: "Audit a bin", damage: "Flag damage", label: "Attach label" };
 
 function endOfToday() {
   const d = new Date(); d.setHours(23, 59, 0, 0); return d;
@@ -15,12 +16,14 @@ function toLocalInput(d: Date) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCode?: string }) {
+export default function ScanFlow({ mode, initialCode, assetId }: { mode: Mode; initialCode?: string; assetId?: string }) {
   const router = useRouter();
   const [snap, setSnap] = useState<Snapshot>();
   const [asset, setAsset] = useState<Asset | null>(null);
   const [person, setPerson] = useState<Person | null>(null); // sticky: scan a badge once, check out many tools
   const [bin, setBin] = useState<Location | null>(null); // sticky: scan a shelf once, deposit many tools
+  const [unknown, setUnknown] = useState<string | null>(null); // a pre-printed label nobody owns yet
+  const [labelSearch, setLabelSearch] = useState("");
   const [missing, setMissing] = useState<Set<string>>(new Set());
   const [condition, setCondition] = useState<"good" | "fair" | "damaged">("good");
   const [note, setNote] = useState("");
@@ -37,9 +40,33 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
     return () => window.removeEventListener("online", sync);
   }, []);
 
+  function notify(m: string) { setToast(m); setTimeout(() => setToast(null), 2500); }
+
+  const target = assetId ? snap?.assets.find((x) => x.id === assetId) : undefined;
+
+  async function attachLabel(id: string, code: string) {
+    setBusy(true);
+    const { error } = await createClient().from("assets").update({ barcode: code }).eq("id", id);
+    setBusy(false);
+    if (error) return notify(error.message);
+    const name = snap?.assets.find((x) => x.id === id)?.name ?? "tool";
+    notify(`Label ${code} attached to ${name}`);
+    setUnknown(null); setLabelSearch("");
+    setSnap(await refreshSnapshot());
+    if (mode === "label") router.push(`/assets/${id}`);
+  }
+
   const resolve = useCallback((code: string) => {
     if (!snap) return;
     const a = snap.assets.find((x) => x.barcode === code || x.id === code || x.serial === code);
+    const l = snap.locations.find((x) => x.code === code || x.id === code);
+    const p = snap.people.find((x) => x.badge_code === code || x.id === code);
+    if (mode === "label") {
+      if (a) return notify(`That label already belongs to ${a.name}`);
+      if (l || p) return notify("That is a bin or badge label, not a tool label");
+      if (assetId) return void attachLabel(assetId, code);
+      return setUnknown(code);
+    }
     if (a) {
       if (mode === "lookup") return router.push(`/assets/${a.id}`);
       if (mode === "audit" && bin) {
@@ -50,12 +77,11 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
       setMissing(new Set()); setCondition("good"); setNote("");
       return setAsset(a);
     }
-    const l = snap.locations.find((x) => x.code === code || x.id === code);
     if (l) return (setBin(l), notify(`Bin: ${l.name}`));
-    const p = snap.people.find((x) => x.badge_code === code || x.id === code);
     if (p) return (setPerson(p), notify(`Person: ${p.name}`));
-    notify(`Unknown code: ${code}`);
-  }, [snap, mode, bin, router]);
+    setUnknown(code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- attachLabel only reads state through setters
+  }, [snap, mode, bin, router, assetId]);
 
   // Asset page links here with ?code=; resolve it once the snapshot is in.
   const initialDone = useRef(false);
@@ -65,8 +91,6 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
       resolve(initialCode);
     }
   }, [initialCode, snap, resolve]);
-
-  function notify(m: string) { setToast(m); setTimeout(() => setToast(null), 2500); }
 
   async function confirm() {
     if (!asset) return;
@@ -91,11 +115,13 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
   const children = asset?.kind === "kit" ? snap?.assets.filter((x) => x.kit_id === asset.id) ?? [] : [];
   const expected = bin ? snap?.assets.filter((x) => x.location_id === bin.id && x.status !== "checked_out") ?? [] : [];
   const canConfirm = mode !== "checkout" || person || bin;
+  const needle = labelSearch.trim().toLowerCase();
+  const unlabeled = (snap?.assets ?? []).filter((x) => !x.barcode && (!needle || x.name.toLowerCase().includes(needle))).slice(0, 12);
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-black">{TITLES[mode]}</h1>
+        <h1 className="text-2xl font-black">{TITLES[mode]}{target ? `: ${target.name}` : ""}</h1>
         {pending > 0 && <span className="badge bg-orange-500 text-white">{pending} waiting to sync</span>}
       </div>
       <div className="flex gap-2 flex-wrap text-lg">
@@ -103,12 +129,13 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
         {bin && <button className="badge bg-green-700 text-white" onClick={() => setBin(null)}>📦 {bin.name} ✕</button>}
       </div>
 
-      {!asset && <Scanner onCode={resolve} />}
+      {!asset && !unknown && <Scanner onCode={resolve} />}
+      {mode === "label" && !unknown && <p className="card text-gray-700 text-lg">{target ? "Point the camera at the pre-printed label you want to stick on this tool." : "Scan a pre-printed label, then pick the tool it belongs to."}</p>}
       {!asset && mode === "checkout" && !person && !bin && snap && (
         <div className="card flex flex-col gap-2">
           <p className="text-gray-700">Who is taking it? (or scan a badge / truck bin)</p>
           <div className="grid grid-cols-2 gap-2">
-            {snap.people.map((p) => <button key={p.id} className="btn btn-secondary" onClick={() => setPerson(p)}>{p.name}</button>)}
+            {snap.people.map((p) => <button key={p.id} className="btn btn-outline" onClick={() => setPerson(p)}>{p.name}</button>)}
           </div>
         </div>
       )}
@@ -116,15 +143,28 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
       {!asset && mode === "audit" && bin && (
         <ul className="card flex flex-col gap-1 text-lg">
           {expected.map((a) => <li key={a.id}>{seen.has(a.id) ? "✅" : "⬜"} {a.name}</li>)}
-          {expected.length === 0 && <li className="text-gray-600">Nothing is recorded in this bin yet.</li>}
+          {expected.length === 0 && <li className="text-gray-500">Nothing is recorded in this bin yet.</li>}
         </ul>
+      )}
+
+      {unknown && (
+        <div className="card flex flex-col gap-3">
+          <p className="text-xl font-bold">New label: <span className="font-mono">{unknown}</span></p>
+          <p className="text-gray-700">Nothing wears this label yet. Which tool is it for?</p>
+          <input className="input" placeholder="Search tools without a label" value={labelSearch} onChange={(e) => setLabelSearch(e.target.value)} autoFocus />
+          <div className="grid grid-cols-1 gap-2 max-h-72 overflow-y-auto">
+            {unlabeled.map((a) => <button key={a.id} className="btn btn-outline min-h-14 text-lg justify-start" disabled={busy} onClick={() => attachLabel(a.id, unknown)}>{a.name}</button>)}
+            {unlabeled.length === 0 && <p className="text-gray-500">No unlabeled tools match. Add the tool on the Admin page first.</p>}
+          </div>
+          <button className="btn btn-secondary" onClick={() => { setUnknown(null); setLabelSearch(""); }}>Cancel</button>
+        </div>
       )}
 
       {asset && (
         <div className="card flex flex-col gap-4">
           <div>
             <p className="text-2xl font-bold">{asset.name}</p>
-            <p className="text-gray-600">{asset.kind} · {asset.status.replace("_", " ")}{asset.serial ? ` · SN ${asset.serial}` : ""}</p>
+            <p className="text-gray-600">{asset.kind.replace("_", " ")} · {asset.status.replace("_", " ")}{asset.serial ? ` · SN ${asset.serial}` : ""}</p>
           </div>
           {children.length > 0 && (
             <div>
@@ -142,7 +182,7 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
             <>
               {!person && !bin && snap && (
                 <div className="grid grid-cols-2 gap-2">
-                  {snap.people.map((p) => <button key={p.id} className="btn btn-secondary" onClick={() => setPerson(p)}>{p.name}</button>)}
+                  {snap.people.map((p) => <button key={p.id} className="btn btn-outline" onClick={() => setPerson(p)}>{p.name}</button>)}
                 </div>
               )}
               <label className="flex flex-col gap-1">Due back
@@ -153,7 +193,7 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
           {mode === "checkin" && (
             <div className="grid grid-cols-3 gap-2">
               {(["good", "fair", "damaged"] as const).map((c) => (
-                <button key={c} className={`btn ${condition === c ? "btn-primary" : "btn-secondary"}`} onClick={() => setCondition(c)}>{c}</button>
+                <button key={c} className={`btn ${condition === c ? "btn-primary" : "btn-outline"}`} onClick={() => setCondition(c)}>{c}</button>
               ))}
             </div>
           )}
@@ -162,13 +202,13 @@ export default function ScanFlow({ mode, initialCode }: { mode: Mode; initialCod
             <input className="input" placeholder="What is wrong?" value={note} onChange={(e) => setNote(e.target.value)} />
           )}
           <div className="grid grid-cols-2 gap-2">
-            <button className="btn btn-secondary" onClick={() => setAsset(null)} disabled={busy}>Cancel</button>
+            <button className="btn btn-outline" onClick={() => setAsset(null)} disabled={busy}>Cancel</button>
             <button className={`btn ${mode === "damage" ? "btn-danger" : "btn-primary"}`} onClick={confirm} disabled={busy || !canConfirm}>Confirm</button>
           </div>
         </div>
       )}
 
-      {toast && <div className="fixed bottom-6 left-4 right-4 rounded-2xl bg-green-800 text-white p-4 text-xl font-bold text-center shadow-xl">{toast}</div>}
+      {toast && <div className="fixed bottom-24 md:bottom-6 left-4 right-4 md:left-auto md:w-96 rounded-2xl bg-green-800 text-white p-4 text-xl font-bold text-center shadow-xl z-30">{toast}</div>}
     </div>
   );
 }

@@ -28,6 +28,7 @@ export type Database = {
           location_id: string | null
           name: string
           notes: string | null
+          photo_url: string | null
           quantity: number
           serial: string | null
           status: string
@@ -45,6 +46,7 @@ export type Database = {
           location_id?: string | null
           name: string
           notes?: string | null
+          photo_url?: string | null
           quantity?: number
           serial?: string | null
           status?: string
@@ -62,6 +64,7 @@ export type Database = {
           location_id?: string | null
           name?: string
           notes?: string | null
+          photo_url?: string | null
           quantity?: number
           serial?: string | null
           status?: string

@@ -20,7 +20,7 @@ export async function proxy(request: NextRequest) {
   );
   const { data: { user } } = await supabase.auth.getUser();
   const { pathname } = request.nextUrl;
-  const isPublic = pathname.startsWith("/login") || pathname.startsWith("/auth") || pathname.startsWith("/api/reports");
+  const isPublic = pathname.startsWith("/login") || pathname.startsWith("/auth") || pathname.startsWith("/api/reports") || /\.[a-z0-9]+$/i.test(pathname); // static files (logo, icons) are not gated
   const url = request.nextUrl.clone();
   if (!user && !isPublic) {
     url.pathname = "/login";
@@ -35,5 +35,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icons/).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icons/|logo.png).*)"],
 };

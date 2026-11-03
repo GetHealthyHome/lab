@@ -1,6 +1,8 @@
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { STATUS, statusOf } from "@/lib/status";
 
 export default async function AssetPage({ params }: PageProps<"/assets/[id]">) {
   const { id } = await params;
@@ -11,25 +13,29 @@ export default async function AssetPage({ params }: PageProps<"/assets/[id]">) {
     supabase.from("movements").select("*,person:people(name),location:locations!movements_location_id_fkey(name)").eq("asset_id", id).order("created_at", { ascending: false }).limit(20),
   ]);
   if (!asset) notFound();
+  const s = statusOf(asset);
   const out = asset.status === "checked_out";
   return (
     <>
-      <div className="card">
-        <h1 className="text-3xl font-black">{asset.name}</h1>
-        <p className="text-gray-700 text-lg mt-1">
-          <span className={`badge ${out ? "bg-orange-500 text-white" : asset.status === "available" ? "bg-green-700 text-white" : "bg-red-600"}`}>{asset.status.replace("_", " ")}</span>
-          {" "}· {asset.kind.replace("_", " ")} · condition {asset.condition}
-        </p>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 mt-3 text-lg">
-          <dt className="text-gray-600">Holder</dt><dd>{asset.holder?.name ?? "—"}</dd>
-          <dt className="text-gray-600">Location</dt><dd>{asset.location?.name ?? "—"}</dd>
-          <dt className="text-gray-600">Home bin</dt><dd>{asset.home?.name ?? "—"}</dd>
-          <dt className="text-gray-600">Due</dt><dd>{asset.due_at ? new Date(asset.due_at).toLocaleString() : "—"}</dd>
-          <dt className="text-gray-600">Barcode</dt><dd className="font-mono">{asset.barcode ?? "—"}</dd>
-          <dt className="text-gray-600">Serial</dt><dd className="font-mono">{asset.serial ?? "—"}</dd>
-          {asset.quantity > 1 && <><dt className="text-gray-600">Quantity</dt><dd>{asset.quantity}</dd></>}
-        </dl>
-        {asset.notes && <p className="mt-2 text-gray-700">{asset.notes}</p>}
+      <Link href="/items" className="text-green-800 font-semibold">‹ Items</Link>
+      <div className={`card border-l-8 ${STATUS[s].border} flex flex-col md:flex-row gap-4`}>
+        {asset.photo_url
+          ? <Image src={asset.photo_url} alt={asset.name} width={320} height={320} className="w-full md:w-56 h-56 rounded-xl object-cover bg-gray-100" />
+          : <div className="w-full md:w-56 h-40 md:h-56 rounded-xl bg-gray-100 flex items-center justify-center text-6xl">🔧</div>}
+        <div className="flex-1">
+          <h1 className="text-3xl font-black">{asset.name}</h1>
+          <p className="mt-1"><span className={`badge text-white ${STATUS[s].bg}`}>{STATUS[s].label}</span> <span className="text-gray-600">· {asset.kind.replace("_", " ")} · condition {asset.condition}</span></p>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 mt-3 text-lg">
+            <dt className="text-gray-500">Holder</dt><dd>{asset.holder?.name ?? "—"}</dd>
+            <dt className="text-gray-500">Location</dt><dd>{asset.location?.name ?? "—"}</dd>
+            <dt className="text-gray-500">Home bin</dt><dd>{asset.home?.name ?? "—"}</dd>
+            <dt className="text-gray-500">Due</dt><dd>{asset.due_at ? new Date(asset.due_at).toLocaleString() : "—"}</dd>
+            <dt className="text-gray-500">Label</dt><dd className="font-mono">{asset.barcode ?? <Link href={`/scan?mode=label&asset=${asset.id}`} className="text-orange-600 font-sans font-bold">Attach a label</Link>}</dd>
+            <dt className="text-gray-500">Serial</dt><dd className="font-mono">{asset.serial ?? "—"}</dd>
+            {asset.quantity > 1 && <><dt className="text-gray-500">Quantity</dt><dd>{asset.quantity}</dd></>}
+          </dl>
+          {asset.notes && <p className="mt-2 text-gray-700">{asset.notes}</p>}
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-2">
         {out
@@ -40,7 +46,7 @@ export default async function AssetPage({ params }: PageProps<"/assets/[id]">) {
       {children && children.length > 0 && (
         <div className="card">
           <h2 className="font-bold text-xl mb-2">Kit contents</h2>
-          <ul>{children.map((c) => <li key={c.id} className="py-1 text-lg"><Link href={`/assets/${c.id}`}>{c.name}</Link> <span className="text-gray-600">· {c.status.replace("_", " ")}</span></li>)}</ul>
+          <ul>{children.map((c) => <li key={c.id} className="py-1 text-lg"><Link href={`/assets/${c.id}`}>{c.name}</Link> <span className="text-gray-500">· {c.status.replace("_", " ")}</span></li>)}</ul>
         </div>
       )}
       <div className="card">

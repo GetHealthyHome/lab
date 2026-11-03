@@ -5,10 +5,10 @@ import "./globals.css";
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Lab Tool Tracker",
+  title: "LAB toolbox",
   description: "Scan, check out, and find every tool in the hands-on lab.",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "default", title: "Tools" },
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "LAB toolbox" },
   icons: { apple: "/icons/icon-192.png" },
 };
 
