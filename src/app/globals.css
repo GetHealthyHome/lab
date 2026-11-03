@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Lab palette: white background, green structure, orange actions, blue for people.
+/* LAB toolbox palette: light grey canvas, white cards, dark green navigation, orange actions, blue for people.
    Big, high-contrast targets: used with gloves in dim attics and basements. */
 @theme inline {
   --font-sans: var(--font-geist-sans);
@@ -8,18 +8,22 @@
 }
 
 body {
-  background: #ffffff;
+  background: #f2f5f3;
   color: #14301f;
 }
 
 .btn {
-  @apply flex items-center justify-center rounded-2xl px-5 font-bold text-xl min-h-16 select-none active:scale-95 transition disabled:opacity-50;
+  @apply flex items-center justify-center gap-2 rounded-2xl px-5 font-bold text-xl min-h-16 select-none active:scale-95 transition disabled:opacity-50;
 }
 .btn-primary { @apply bg-orange-500 text-white; }
 .btn-secondary { @apply bg-green-700 text-white; }
+.btn-outline { @apply bg-white text-green-800 border-2 border-green-700; }
 .btn-danger { @apply bg-red-600 text-white; }
 .input {
-  @apply w-full rounded-xl bg-white border-2 border-green-300 px-4 py-4 text-xl text-green-950 placeholder-gray-400 focus:border-orange-500 outline-none;
+  @apply w-full rounded-xl bg-white border-2 border-gray-300 px-4 py-4 text-xl text-green-950 placeholder-gray-400 focus:border-orange-500 outline-none;
 }
-.card { @apply rounded-2xl bg-white border-2 border-green-200 p-4; }
+.card { @apply rounded-2xl bg-white border border-gray-200 p-4 shadow-sm; }
 .badge { @apply inline-block rounded-full px-3 py-1 text-sm font-bold; }
+.tab { @apply rounded-full px-4 py-2 font-bold text-base whitespace-nowrap; }
+.tab-on { @apply bg-green-800 text-white; }
+.tab-off { @apply bg-white text-green-900 border border-gray-300; }

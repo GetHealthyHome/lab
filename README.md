@@ -1,4 +1,4 @@
-# Lab Tool Tracker
+# LAB toolbox
 
 Mobile-first PWA for checking tools and kits in and out of the hands-on HVAC lab by scanning their barcodes.
 

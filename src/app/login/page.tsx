@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -22,7 +23,7 @@ export default function LoginPage() {
 
   return (
     <main className="flex-1 flex flex-col justify-center gap-6 p-6 max-w-md mx-auto w-full">
-      <h1 className="text-3xl font-black text-green-800">Lab Tool Tracker</h1>
+      <Image src="/logo.png" alt="LAB toolbox" width={160} height={192} className="mx-auto" priority />
       <form onSubmit={signIn} className="flex flex-col gap-4">
         <input className="input" type="email" required autoComplete="username" placeholder="you@school.edu" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input className="input" type="password" required autoComplete="current-password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />

@@ -1,6 +1,6 @@
 {
-  "name": "Lab Tool Tracker",
-  "short_name": "Tools",
+  "name": "LAB toolbox",
+  "short_name": "LAB toolbox",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
