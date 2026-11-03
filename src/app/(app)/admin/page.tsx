@@ -49,7 +49,7 @@ export default async function AdminPage() {
 
       <section className="card flex flex-col gap-3">
         <h2 className="text-xl font-bold">Add a person</h2>
-        <p className="text-gray-600">Fill in a temporary password to give them a login; they must change it the first time they sign in. Leave it blank for students who only borrow tools.</p>
+        <p className="text-gray-600">Fill in a temporary password to give them a login, or to reset the password of someone who already has one; they must change it the next time they sign in. Leave it blank for students who only borrow tools. Only admins can add trainers, admins or logins.</p>
         <form action={addPerson} className="grid gap-2 md:grid-cols-3">
           <input className="input" name="name" placeholder="Full name" required />
           <select className="input" name="role"><option value="student">Student</option><option value="trainer">Trainer</option><option value="admin">Admin</option></select>

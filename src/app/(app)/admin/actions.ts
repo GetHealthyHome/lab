@@ -35,8 +35,11 @@ export async function addPerson(f: FormData) {
       body: JSON.stringify({ name, email, role, password }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `Could not create login (${res.status})`);
-    // the auth trigger inserted/updated the people row; just attach the badge if given
-    if (str(f, "badge_code")) await sb.from("people").update({ badge_code: str(f, "badge_code") }).eq("email", email);
+    // the auth trigger inserted/updated the people row; attach the badge if given
+    if (str(f, "badge_code")) {
+      const { error } = await sb.from("people").update({ badge_code: str(f, "badge_code") }).eq("email", email);
+      if (error) throw new Error(`Login created, but the badge was not saved (is it already assigned?): ${error.message}`);
+    }
   } else {
     const { error } = await sb.from("people").insert({ name, role, email, badge_code: str(f, "badge_code") });
     if (error) throw new Error(error.message);

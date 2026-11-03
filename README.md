@@ -11,7 +11,7 @@ cp .env.example .env.local   # fill in the server-only values if you want the ni
 npm install
 npm run dev
 ```
-Sign in with the email and temporary password your admin gave you; the app makes you choose a new password on first sign-in. Admins create logins on the Admin page ("Add a person" with a temporary password), which calls the `admin-create-user` edge function in `supabase/functions/`.
+Sign in with the email and temporary password your admin gave you; the app makes you choose a new password on first sign-in. Admins create logins on the Admin page ("Add a person" with a temporary password), which calls the `admin-create-user` edge function in `supabase/functions/`; submitting an existing login's email with a new temporary password resets it. Roles and login links on `people` can only be changed by admins (database trigger), and self-service sign-up is refused.
 
 ## How it works
 - **Codes.** A scanned value is matched against `assets.barcode`, `assets.serial`, `assets.id`, `locations.code` and `people.badge_code`. Print QR stickers whose value is the code you typed when adding the item.
