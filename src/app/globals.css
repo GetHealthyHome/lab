@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* High contrast, big targets: used with gloves in dim attics and basements. */
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: #0b0f14;
+  color: #f5f7fa;
+}
+
+.btn {
+  @apply flex items-center justify-center rounded-2xl px-5 font-bold text-xl min-h-16 select-none active:scale-95 transition;
+}
+.btn-primary { @apply bg-amber-400 text-black; }
+.btn-secondary { @apply bg-slate-700 text-white; }
+.btn-danger { @apply bg-red-600 text-white; }
+.input {
+  @apply w-full rounded-xl bg-slate-800 border-2 border-slate-600 px-4 py-4 text-xl text-white placeholder-slate-400;
+}
+.card { @apply rounded-2xl bg-slate-900 border border-slate-700 p-4; }
+.badge { @apply inline-block rounded-full px-3 py-1 text-sm font-bold; }
