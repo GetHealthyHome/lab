@@ -16,7 +16,7 @@ export async function addAsset(f: FormData) {
   }
   const { error } = await sb.from("assets").insert({
     photo_url,
-    name: str(f, "name")!, kind: str(f, "kind") ?? "individual", barcode: str(f, "barcode"), serial: str(f, "serial"),
+    name: str(f, "name")!, brand: str(f, "brand"), kind: str(f, "kind") ?? "individual", barcode: str(f, "barcode"), serial: str(f, "serial"),
     quantity: Number(f.get("quantity") || 1), kit_id: str(f, "kit_id"),
     home_location_id: str(f, "home_location_id"), location_id: str(f, "home_location_id"), notes: str(f, "notes"),
   });

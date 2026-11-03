@@ -17,6 +17,7 @@ export type Database = {
       assets: {
         Row: {
           barcode: string | null
+          brand: string | null
           condition: string
           created_at: string
           due_at: string | null
@@ -25,6 +26,7 @@ export type Database = {
           id: string
           kind: string
           kit_id: string | null
+          last_checked_out_at: string | null
           location_id: string | null
           name: string
           notes: string | null
@@ -35,6 +37,7 @@ export type Database = {
         }
         Insert: {
           barcode?: string | null
+          brand?: string | null
           condition?: string
           created_at?: string
           due_at?: string | null
@@ -43,6 +46,7 @@ export type Database = {
           id?: string
           kind?: string
           kit_id?: string | null
+          last_checked_out_at?: string | null
           location_id?: string | null
           name: string
           notes?: string | null
@@ -53,6 +57,7 @@ export type Database = {
         }
         Update: {
           barcode?: string | null
+          brand?: string | null
           condition?: string
           created_at?: string
           due_at?: string | null
@@ -61,6 +66,7 @@ export type Database = {
           id?: string
           kind?: string
           kit_id?: string | null
+          last_checked_out_at?: string | null
           location_id?: string | null
           name?: string
           notes?: string | null

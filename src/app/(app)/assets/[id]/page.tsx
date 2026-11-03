@@ -18,23 +18,27 @@ export default async function AssetPage({ params }: PageProps<"/assets/[id]">) {
   return (
     <>
       <Link href="/items" className="text-green-800 font-semibold">‹ Items</Link>
-      <div className={`card border-l-8 ${STATUS[s].border} flex flex-col md:flex-row gap-4`}>
-        {asset.photo_url
-          ? <Image src={asset.photo_url} alt={asset.name} width={320} height={320} className="w-full md:w-56 h-56 rounded-xl object-cover bg-gray-100" />
-          : <div className="w-full md:w-56 h-40 md:h-56 rounded-xl bg-gray-100 flex items-center justify-center text-6xl">🔧</div>}
-        <div className="flex-1">
-          <h1 className="text-3xl font-black">{asset.name}</h1>
-          <p className="mt-1"><span className={`badge text-white ${STATUS[s].bg}`}>{STATUS[s].label}</span> <span className="text-gray-600">· {asset.kind.replace("_", " ")} · condition {asset.condition}</span></p>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 mt-3 text-lg">
-            <dt className="text-gray-500">Holder</dt><dd>{asset.holder?.name ?? "—"}</dd>
-            <dt className="text-gray-500">Location</dt><dd>{asset.location?.name ?? "—"}</dd>
-            <dt className="text-gray-500">Home bin</dt><dd>{asset.home?.name ?? "—"}</dd>
-            <dt className="text-gray-500">Due</dt><dd>{asset.due_at ? new Date(asset.due_at).toLocaleString() : "—"}</dd>
-            <dt className="text-gray-500">Label</dt><dd className="font-mono">{asset.barcode ?? <Link href={`/scan?mode=label&asset=${asset.id}`} className="text-orange-600 font-sans font-bold">Attach a label</Link>}</dd>
-            <dt className="text-gray-500">Serial</dt><dd className="font-mono">{asset.serial ?? "—"}</dd>
-            {asset.quantity > 1 && <><dt className="text-gray-500">Quantity</dt><dd>{asset.quantity}</dd></>}
+      <div className={`card border-l-8 ${STATUS[s].border} flex flex-col gap-4`}>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h1 className="text-3xl font-black leading-tight">{asset.name}</h1>
+            <p className="text-gray-600 text-lg">{asset.brand ?? asset.kind.replace("_", " ")}</p>
+          </div>
+          <span className={`badge text-white shrink-0 ${STATUS[s].bg}`}>{STATUS[s].label}</span>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4">
+          {asset.photo_url
+            ? <Image src={asset.photo_url} alt={asset.name} width={320} height={320} className="w-full sm:w-64 h-64 rounded-xl object-cover bg-gray-100 shrink-0" />
+            : <div className="w-full sm:w-64 h-40 sm:h-64 rounded-xl bg-gray-100 flex items-center justify-center text-6xl shrink-0">🔧</div>}
+          <dl className="flex-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-lg content-start">
+            <dt className="text-gray-500">Last time checked out</dt><dd>{asset.last_checked_out_at ? new Date(asset.last_checked_out_at).toLocaleString() : "Never"}</dd>
+            <dt className="text-gray-500">Serial number</dt><dd className="font-mono">{asset.serial ?? "—"}</dd>
+            <dt className="text-gray-500">Location</dt><dd>{asset.location?.name ?? "—"}{asset.home?.name && asset.home.name !== asset.location?.name ? <span className="text-gray-500"> (home: {asset.home.name})</span> : ""}</dd>
+            <dt className="text-gray-500">Barcode</dt><dd className="font-mono">{asset.barcode ?? <Link href={`/scan?mode=label&asset=${asset.id}`} className="text-orange-600 font-sans font-bold">Attach a label</Link>}</dd>
+            <dt className="text-gray-500">Notes</dt><dd>{asset.notes ?? "—"}</dd>
+            {out && <><dt className="text-gray-500">Holder</dt><dd>{asset.holder?.name ?? "—"}</dd><dt className="text-gray-500">Due back</dt><dd>{asset.due_at ? new Date(asset.due_at).toLocaleString() : "—"}</dd></>}
+            <dt className="text-gray-500">Condition</dt><dd>{asset.condition}{asset.quantity > 1 ? ` · qty ${asset.quantity}` : ""}</dd>
           </dl>
-          {asset.notes && <p className="mt-2 text-gray-700">{asset.notes}</p>}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">

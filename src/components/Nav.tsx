@@ -27,20 +27,15 @@ const LINKS = [
 
 const isActive = (path: string, href: string) => (href === "/" ? path === "/" : path.startsWith(href.split("?")[0]));
 
-export function Logo({ size = 40 }: { size?: number }) {
-  return (
-    <span className="flex items-center gap-2">
-      <Image src="/logo.png" alt="" width={size} height={Math.round(size * 1.2)} priority />
-      <span className="font-black leading-none"><span className="block text-xs tracking-widest">LAB</span><span className="block text-lg -mt-0.5">toolbox</span></span>
-    </span>
-  );
+export function Logo({ size = 72 }: { size?: number }) {
+  return <Image src="/logo.png" alt="LAB toolbox" width={size} height={Math.round(size * 1.2)} priority />;
 }
 
 export function SideNav({ userName }: { userName: string }) {
   const path = usePathname();
   return (
     <aside className="hidden md:flex flex-col w-60 shrink-0 bg-green-900 text-white min-h-screen sticky top-0">
-      <div className="p-5 border-b border-green-800"><Logo /></div>
+      <div className="bg-white p-4 flex justify-center"><Logo size={96} /></div>
       <p className="px-5 pt-4 pb-2 text-green-200 text-sm">Signed in as <span className="text-white font-bold">{userName}</span></p>
       <nav className="flex flex-col gap-1 p-3 flex-1">
         {LINKS.map((l) => (
