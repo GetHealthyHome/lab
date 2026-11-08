@@ -1,65 +1,432 @@
 <!doctype html>
-<!-- Placeholder screen for bench testing only. The real kiosk UI is still being designed; it will use the same /api endpoints. -->
+<!-- Kiosk screen for the 7" touchscreen (800x480) in Chromium kiosk mode. One lean page, no libraries: it only talks to /api.
+     Logo: drop the lab's logo in as static/logo.png (or overwrite static/logo.svg); it shows big on the start screen and small in every header. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lab Toolbox kiosk (placeholder)</title>
+<title>Lab Toolbox</title>
 <style>
-  body { font: 20px system-ui, sans-serif; margin: 24px; background: #fff; color: #111; }
-  button { font-size: 22px; min-height: 60px; min-width: 160px; margin: 6px; }
-  input { font-size: 22px; padding: 8px; width: 320px; }
-  #msg { margin: 12px 0; padding: 12px; min-height: 1.5em; }
-  .ok { border: 4px solid #1a7f37; } .bad { border: 4px solid #cf222e; }
-  #bar { height: 14px; background: #1a7f37; transition: width 1s linear; }
+:root { --bg:#0f172a; --panel:#1e293b; --line:#334155; --text:#f8fafc; --muted:#a5b4c8; --green:#15803d; --green-hi:#22c55e;
+        --red:#dc2626; --amber:#f59e0b; --blue:#2563eb; --tap:80px; /* 15 mm on the official 7" screen (about 5.2 px per mm) */ }
+* { box-sizing:border-box; margin:0; padding:0; }
+[hidden] { display:none !important; }
+html, body { height:100%; background:var(--bg); color:var(--text); font:24px/1.25 system-ui, "DejaVu Sans", sans-serif;
+             overflow:hidden; user-select:none; -webkit-user-select:none; touch-action:manipulation; cursor:none; }
+#app { position:fixed; inset:0; display:flex; flex-direction:column; }
+#app::after { content:""; position:absolute; inset:0; pointer-events:none; border:10px solid transparent; transition:border-color .15s; }
+#app.f-ok::after { border-color:var(--green-hi); } #app.f-bad::after { border-color:var(--red); } #app.f-warn::after { border-color:var(--amber); }
+#app.f-bad { animation:shake .3s; }
+@keyframes shake { 25% { transform:translateX(-8px); } 75% { transform:translateX(8px); } }
+header { height:56px; flex:none; display:flex; align-items:center; gap:12px; padding:0 18px; background:var(--panel); border-bottom:2px solid var(--line); }
+header img { height:42px; width:42px; object-fit:contain; }
+header .t { flex:1; font-size:26px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.clock { color:var(--muted); font-size:22px; }
+main { flex:1; min-height:0; padding:14px 18px; display:flex; flex-direction:column; gap:12px; }
+button { font:inherit; font-weight:700; color:var(--text); background:var(--panel); border:3px solid var(--line); border-radius:14px;
+         min-height:var(--tap); min-width:var(--tap); padding:6px 14px; }
+button:active { filter:brightness(1.35); transform:scale(.97); }
+button.green { background:var(--green); border-color:var(--green-hi); } button.red { background:var(--red); border-color:#f87171; }
+button.blue { background:var(--blue); border-color:#60a5fa; } button.amber { background:var(--amber); border-color:#fcd34d; color:#111; }
+button.on { outline:5px solid var(--text); outline-offset:3px; }
+button.ghost { background:transparent; }
+button.sm { min-height:64px; font-size:22px; }
+h1 { font-size:40px; } h2 { font-size:28px; } .muted { color:var(--muted); } .small { font-size:20px; }
+.row { display:flex; gap:12px; } .col { display:flex; flex-direction:column; gap:12px; } .grow { flex:1; min-width:0; min-height:0; }
+.scroll { overflow-y:auto; overscroll-behavior:contain; }
+.msg { flex:none; min-height:58px; display:flex; align-items:center; gap:12px; padding:8px 14px; border-radius:12px; font-size:26px; font-weight:700; background:var(--panel); }
+.msg.ok { background:#14532d; } .msg.bad { background:#7f1d1d; } .msg.warn { background:#78350f; }
+.msg i { font-style:normal; font-size:30px; width:34px; text-align:center; }
+/* start screen */
+.idle { flex:1; display:flex; gap:24px; padding:22px; }
+.idle .brand { width:300px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; }
+.idle .brand img { width:230px; height:230px; object-fit:contain; }
+.idle .prompt { font-size:30px; font-weight:700; min-height:84px; display:flex; align-items:center; }
+.idle .mode { flex:1; font-size:36px; min-height:110px; }
+/* session */
+.items li { list-style:none; display:flex; align-items:center; gap:12px; min-height:var(--tap); padding:6px 6px 6px 16px; border-bottom:2px solid var(--line); }
+.items li:first-child { animation:slide .35s ease-out; }
+@keyframes slide { from { transform:translateX(-40px); opacity:0; } }
+.items .n { font-size:26px; font-weight:700; } .items .d { font-size:19px; color:var(--muted); }
+.card { border:3px solid var(--amber); border-radius:12px; padding:10px 14px; background:#2a2312; }
+.card.blue { border-color:#60a5fa; background:#172554; }
+.chips { display:flex; flex-wrap:wrap; gap:10px; }
+.bar { flex:none; height:34px; border-radius:17px; background:var(--panel); position:relative; overflow:hidden; }
+.bar div { position:absolute; inset:0 auto 0 0; background:var(--green-hi); transition:width 1s linear; }
+.bar div.low { background:var(--amber); }
+.bar span { position:absolute; inset:0; text-align:center; font-size:20px; font-weight:700; line-height:34px; color:#fff; text-shadow:0 1px 3px #000; }
+.side { width:236px; flex:none; }
+.side .done { flex:1; font-size:40px; }
+/* PIN pad */
+.pad { display:grid; grid-template-columns:repeat(3, 96px); gap:10px; }
+.pad button { font-size:34px; }
+.dots { display:flex; gap:18px; } .dots b { width:34px; height:34px; border-radius:50%; border:4px solid var(--text); }
+.dots b.f { background:var(--text); }
+/* summary and lock */
+.banner { background:var(--green); border-radius:14px; padding:10px 18px; }
+.banner .what { font-size:22px; } .banner .where { font-size:34px; font-weight:800; letter-spacing:.5px; }
+.lock { flex:1; background:#7f1d1d; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:20px; }
+.lock .big { font-size:72px; font-weight:800; font-variant-numeric:tabular-nums; }
+/* on-screen keyboard (instructor and report screens only; normal checkouts never type) */
+.kb { display:grid; grid-template-columns:repeat(10, 1fr); gap:6px; flex:none; }
+.kb button { min-height:54px; min-width:0; padding:0; font-size:26px; border-radius:10px; }
+.kb .w2 { grid-column:span 2; }
+.field { flex:1; min-height:56px; display:flex; align-items:center; padding:0 16px; border:3px solid var(--line); border-radius:12px; background:#020617; font-size:28px; }
+.field:empty::before { content:attr(data-ph); color:var(--muted); }
+.list-btn { width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.overdue { color:#fca5a5; }
+.offline { position:fixed; bottom:6px; right:10px; font-size:18px; color:var(--muted); }
 </style>
 </head>
 <body>
-<h1>Lab Toolbox</h1>
-<p>Type or paste a code and press Enter (a USB scanner works the same way).</p>
-<div><button id="out">Check out</button><button id="in">Return</button></div>
-<input id="code" autofocus placeholder="ID code first, then tool codes">
-<div id="msg"></div>
-<div id="bar" style="width:0"></div>
-<ul id="items"></ul>
-<button id="done">Done</button><button id="cancel">Cancel</button>
+<div id="app"><header id="hdr" hidden><img id="hlogo" alt="Lab logo"><div class="t" id="htitle"></div><div class="clock" id="clock"></div></header>
+<main id="main"></main></div>
+<div class="offline" id="offline" hidden>Kiosk service not answering…</div>
 <script>
-let lastSeq = 0, needPin = false;
+"use strict";
 const $ = id => document.getElementById(id);
-const call = (method, url, body) => fetch(url, {method, headers: {"Content-Type": "application/json"},
-  body: body && JSON.stringify(body)}).then(async r => ({ok: r.ok, data: await r.json()}));
-const say = (text, ok) => { $("msg").textContent = text; $("msg").className = ok ? "ok" : "bad"; };
-const mode = action => call("POST", "/api/mode", {action});
-$("out").onclick = () => { mode("out"); say("Check out: scan your ID", true); };
-$("in").onclick = () => { mode("in"); say("Return: scan your ID", true); };
-$("code").onkeydown = async e => {
-  if (e.key !== "Enter") return;
-  const code = e.target.value; e.target.value = "";
-  if (needPin) {  // a PIN prompt is showing: the box takes the 4 digits
-    const r = await call("POST", "/api/pin", {pin: code});
-    if (!r.ok) say(r.data.reason, false);
-  } else await call("POST", "/api/code", {code});  // same path as a camera scan; refresh() shows the result
-  refresh();
-};
-$("done").onclick = async () => {
-  const r = await call("POST", "/api/session/finish");
-  if (!r.ok) return say(r.data.reason, false);
-  say(r.data.items.map(i => i.return_to ? `${i.name}: RETURN TO ${i.return_to}` : i.name).join(" · ") || "Nothing scanned", true);
-  refresh();
-};
-$("cancel").onclick = async () => { await call("DELETE", "/api/session"); say("Cancelled", true); refresh(); };
-async function refresh() {
-  const st = (await call("GET", "/api/session")).data;
-  const ev = st.last_event;
-  if (ev && ev.seq !== lastSeq) { lastSeq = ev.seq; say(ev.text, ev.ok); }
-  needPin = st.instructor_pin || (st.session && st.session.pin !== "ok");
-  $("code").type = needPin ? "password" : "text";
-  $("code").placeholder = needPin ? "Type your 4-digit PIN" : "ID code first, then tool codes";
-  $("items").innerHTML = "";
-  (st.session?.items || []).forEach(i => { const li = document.createElement("li"); li.textContent = i.name; $("items").append(li); });
-  $("bar").style.width = st.session ? `${100 * st.seconds_left / st.idle_timeout}%` : "0";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
+const time = iso => { const d = new Date(iso), today = d.toDateString() === new Date().toDateString();
+  return (today ? "" : d.toLocaleDateString([], {weekday: "short", month: "short", day: "numeric"}) + ", ") + d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"}); };
+const where = label => label ? label.toUpperCase().replace(/\s*,\s*/g, " — ") : "ASK AN INSTRUCTOR";
+const KEYS = "1234567890QWERTYUIOPASDFGHJKL-ZXCVBNM".split("");
+const TAGS = ["Cracked", "Broken part", "Won't power on", "Frayed cord", "Missing piece", "Dull or worn", "Leaking", "Bent"];
+const NOTES = ["Inspected, no damage", "Repaired", "Damage is cosmetic only"];
+
+let st = null, lastSeq = null, lastHtml = "", flashTimer, lastTap = Date.now(), logo = "/static/logo.svg";
+const ui = { pin: "", msg: null, summary: null, locked: null, report: null, inst: null, seenSaved: undefined, cancelArm: 0 };
+// The lab's own logo wins if someone dropped in logo.png; otherwise the placeholder SVG.
+const probe = new Image(); probe.onload = () => { logo = probe.src; lastHtml = ""; render(); }; probe.src = "/static/logo.png";
+
+// ---------- talking to the kiosk service ----------
+async function call(method, url, body) {
+  const r = await fetch(url, {method, headers: {"Content-Type": "application/json"}, body: body && JSON.stringify(body)});
+  let data = {}; try { data = await r.json(); } catch {}
+  if (!r.ok) { const e = {ok: false, kind: data.kind || "rejected", text: data.reason || "That didn't work. Try again.", ...data};
+    feedback(e); throw e; }
+  return data;
 }
-setInterval(refresh, 1000);
+// Run a button's action; refusals are already on screen, so just refresh.
+const go = fn => Promise.resolve().then(fn).catch(() => {}).finally(poll);
+
+async function poll() {
+  try { st = await call("GET", "/api/session"); $("offline").hidden = true; }
+  catch { $("offline").hidden = false; return tick(); }
+  const ev = st.last_event;
+  if (lastSeq === null) lastSeq = ev ? ev.seq : 0;  // don't replay an old scan after a reload
+  else if (ev && ev.seq !== lastSeq) { lastSeq = ev.seq; feedback(ev); }
+  const saved = st.auto_saved;  // the 45 s timer saved a walked-away session: still show its summary
+  if (ui.seenSaved === undefined) ui.seenSaved = saved?.session_id ?? null;
+  else if (saved && saved.session_id !== ui.seenSaved) { ui.seenSaved = saved.session_id; if (saved.items.length) showSummary(saved); }
+  if (st.session) { ui.summary = null; if (st.session.pin === "ok") ui.locked = null; }
+  if (!st.session && !st.instructor) ui.inst = null;
+  render(); tick();
+}
+
+// ---------- feedback: color + words on screen; the Pi's buzzer plays the sound ----------
+function feedback(ev) {
+  const kind = ev.ok ? "ok" : ev.kind === "wrong_battery" ? "warn" : "bad";
+  ui.msg = {kind, text: ev.text || ev.reason, ev, at: Date.now()};
+  if (!ev.ok) ui.pin = "";
+  if (ev.kind === "locked") ui.locked = {until: ev.until, text: ev.text || ev.reason, at: Date.now()};
+  flash(kind);
+}
+function flash(kind) {
+  const app = $("app"); app.className = ""; void app.offsetWidth; app.className = "f-" + kind;
+  clearTimeout(flashTimer);
+  if (kind !== "warn") flashTimer = setTimeout(() => app.className = "", kind === "bad" ? 1000 : 1200);
+}
+const say = (text, kind = "ok") => { ui.msg = {kind, text, at: Date.now()}; flash(kind); render(); };
+const msgBar = hint => {
+  const m = ui.msg && Date.now() - ui.msg.at < 30000 ? ui.msg : null;
+  if (!m) return `<div class="msg"><i>›</i>${esc(hint)}</div>`;
+  const ev = m.ev || {};
+  if (ev.kind === "wrong_battery")  // required and scanned battery side by side
+    return `<div class="msg warn"><i>!</i><div class="grow">Wrong battery<div class="row small"><span class="grow">Needs: <b>${esc(ev.required)}</b></span><span class="grow">You scanned: <b>${esc(ev.scanned)}</b></span></div></div></div>`;
+  return `<div class="msg ${m.kind}"><i>${m.kind === "ok" ? "✓" : m.kind === "warn" ? "!" : "✕"}</i>${esc(m.text)}</div>`;
+};
+
+// ---------- screens ----------
+function view() {
+  const s = st?.session;
+  if (ui.locked) return lockedView();
+  if (ui.summary) return summaryView();
+  if (st?.instructor_pin) return pinView("Instructor PIN", "Instructor: enter your 4-digit PIN");
+  if (s && s.pin !== "ok") return pinView(`Hi, ${s.person}`, s.pin === "setup" ? "Choose a 4-digit PIN. You'll use it every time." : "Enter your 4-digit PIN");
+  if (ui.report) return reportView(s);
+  if (ui.inst && st?.instructor) return instPage();
+  if (s) return sessionView(s);
+  if (st?.instructor) return instHome();
+  return idleView();
+}
+
+function idleView() {
+  const next = st?.next_action || "out";
+  const recent = ui.msg && Date.now() - ui.msg.at < 8000;
+  const prompt = next === "instructor" ? "Instructor: hold your badge up to the camera"
+    : next === "in" ? "Return: hold your ID up to the camera" : "Hold your ID up to the camera to check out";
+  return [null, `<div class="idle">
+    <div class="brand"><img src="${logo}" alt="Lab logo"><h1>Lab Toolbox</h1></div>
+    <div class="col grow">
+      ${recent ? msgBar("") : `<div class="prompt">${esc(prompt)}</div>`}
+      ${next === "instructor" ? `<div class="card blue grow" style="display:flex;align-items:center;font-size:30px">Waiting for an instructor badge…</div>
+        <button class="sm" data-act="mode" data-arg="out">Back</button>` : `
+      <button class="mode blue ${next === "out" ? "on" : ""}" data-act="mode" data-arg="out">Check out</button>
+      <button class="mode green ${next === "in" ? "on" : ""}" data-act="mode" data-arg="in">Return</button>
+      <div class="row"><button class="grow sm" data-act="report">⚠ Report a problem</button><button class="sm" data-act="mode" data-arg="instructor">Instructor</button></div>`}
+    </div></div>`];
+}
+
+function pinView(title, hint) {
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "Cancel"];
+  return [title, `<div class="row grow">
+    <div class="col grow" style="justify-content:center;gap:22px">
+      ${msgBar(hint)}
+      <div class="dots">${[0, 1, 2, 3].map(i => `<b class="${i < ui.pin.length ? "f" : ""}"></b>`).join("")}</div>
+      <p class="muted small">Hide the keypad with your other hand. Ask an instructor if you forgot your PIN.</p>
+    </div>
+    <div class="pad">${keys.map(k => `<button class="${k === "Cancel" ? "sm red" : ""}" style="${k === "Cancel" ? "font-size:20px" : ""}" data-act="pin" data-arg="${k}">${k}</button>`).join("")}</div>
+  </div>`];
+}
+
+function sessionView(s) {
+  const out = s.action === "out", items = [...s.items].reverse();
+  const cards = [];
+  for (const i of s.items.filter(i => i.needs_battery && !i.battery)) {
+    const opt = s.battery_options?.[i.asset_id] || {available: []};
+    cards.push(`<div class="card"><b>${esc(i.name)} needs a battery.</b> Scan a ${esc(opt.group)} battery.
+      <div class="small muted">${opt.available.length ? "Charged: " + opt.available.slice(0, 3).map(b => `${esc(b.name)} at ${esc(b.spot || "?")}`).join(" · ") : "None free right now. Remove the tool or ask an instructor."}</div></div>`);
+  }
+  for (const k of s.kits || []) {
+    if (!out && !k.confirmed) {
+      const miss = ui.kitMissing?.[k.kit_id] || [];
+      cards.push(`<div class="card blue"><b>${esc(k.name)}:</b> ${k.mode === "verified" ? "scan each piece, then confirm." : "tap any piece that is NOT back, then confirm."}
+        <div class="chips" style="margin-top:8px">${k.waiting.map(p => k.mode === "verified" ? `<span class="small muted">${esc(p.name)}</span>`
+          : `<button class="sm ${miss.includes(p.asset_id) ? "red" : "green"}" data-act="kitpiece" data-arg="${esc(k.kit_id)}|${esc(p.asset_id)}">${miss.includes(p.asset_id) ? "✕ Missing" : "✓"} ${esc(p.name)}</button>`).join("")}
+        <button class="sm blue" data-act="kitok" data-arg="${esc(k.kit_id)}">Confirm pieces${k.mode === "verified" && k.waiting.length ? ` (${k.waiting.length} not back)` : ""}</button></div></div>`);
+    } else if (out && k.mode === "verified" && k.waiting.length)
+      cards.push(`<div class="card blue"><b>${esc(k.name)}:</b> scan every piece. Still to scan: ${k.waiting.map(p => esc(p.name)).join(", ")}</div>`);
+  }
+  const title = `${out ? "Checking out" : "Returning"} · ${s.person}${s.started_by ? ` (started by ${s.started_by})` : ""}`;
+  return [title, `<div class="row grow">
+    <div class="col grow">
+      ${msgBar(out ? "Hold each tool's label up to the camera" : "Hold each tool you're returning up to the camera")}
+      <div class="col grow scroll">${cards.join("")}
+        <ul class="items">${items.length ? items.map(i => `<li><div class="grow"><div class="n">${esc(i.name)}</div>
+          <div class="d">${esc(i.asset_id)}${i.kit_id ? " · kit" : ""}${i.battery ? " · battery " + esc(i.battery) : ""}${i.needs_battery && !i.battery ? " · <span style='color:var(--amber)'>needs a battery</span>" : ""}</div></div>
+          <button class="ghost" aria-label="Remove ${esc(i.name)}" data-act="remove" data-arg="${esc(i.asset_id)}">✕</button></li>`).join("")
+          : `<li class="muted" style="animation:none">No tools yet</li>`}</ul></div>
+    </div>
+    <div class="col side">
+      <button class="done green" data-act="done">Done ✓<div class="small">${s.items.length} tool${s.items.length === 1 ? "" : "s"}</div></button>
+      ${st.instructor ? `<button class="sm blue" data-act="asset">Type asset #</button>` : ""}
+      <button class="sm" data-act="report">⚠ Report a problem</button>
+      <button class="sm ${ui.cancelArm > Date.now() ? "red" : ""}" data-act="cancel">${ui.cancelArm > Date.now() ? "Tap again to cancel" : "Cancel"}</button>
+    </div></div>
+    <div class="bar"><div id="fill"></div><span id="secs"></span></div>`];
+}
+
+function summaryView() {
+  const r = ui.summary, out = r.action === "out";
+  const short = (r.kits_short || []).map(k => `<div class="card"><b>${esc(k.name)}</b> came back without ${esc(k.missing.join(", "))}. An instructor has been told.</div>`).join("");
+  const body = out
+    ? `<div class="msg ok"><i>✓</i>Saved. ${r.items.length} tool${r.items.length === 1 ? "" : "s"} checked out to ${esc(r.person)}.</div>
+       ${r.due_at ? `<h2>Due back by ${esc(time(r.due_at))}</h2>` : ""}
+       <div class="grow scroll col">${r.items.map(i => `<div class="n" style="font-size:26px">• ${esc(i.name)}</div>`).join("")}</div>`
+    : `<div class="msg ok"><i>✓</i>Returned. Put each tool back here:</div>
+       <div class="grow scroll col">${short}${r.items.map(i => `<div class="banner"><div class="what">${esc(i.name)}</div><div class="where">RETURN TO: ${esc(where(i.return_to))}</div></div>`).join("")}</div>`;
+  return [out ? "Checkout saved" : "Return saved", `${body}<button class="green" data-act="closesum">OK</button>`];
+}
+
+function lockedView() {
+  return [null, `<div class="lock"><div style="font-size:64px">🔒</div><h1>ID locked</h1><div>${esc(ui.locked.text)}</div>
+    <div class="big" id="lockleft"></div><div class="small">Ask an instructor if you need a tool now.</div>
+    <button class="sm" data-act="closelock">OK</button></div>`];
+}
+
+// Report a problem (K8, K14, K15): from any screen, no typing needed when the tool is in your list.
+function reportView(s) {
+  const r = ui.report, back = `<button class="sm" data-act="${r.step === "type" ? "closereport" : "rback"}">‹ Back</button>`;
+  if (r.step === "type") return ["Report a problem", `<div class="row">${back}<h2 class="grow" style="align-self:center">What's wrong?</h2></div>
+    <button class="grow red" data-act="rtype" data-arg="damage">Damaged tool</button>
+    <button class="grow amber" data-act="rtype" data-arg="spot">Tool not in its spot</button>
+    <button class="grow" data-act="rtype" data-arg="label">Worn or unreadable label</button>`];
+  if (r.step === "tool") {
+    const mine = (s?.items || []).map(i => ({asset_id: i.asset_id, name: i.name}));
+    return ["Which tool?", picker(back, "Type the tool's name or number", mine.length && !r.q ? mine : r.results,
+      t => `<button class="grow list-btn sm" data-act="rtool" data-arg="${esc(t.asset_id)}"><span>${esc(t.name)}</span><span class="small muted">${esc(t.asset_id)}</span></button>`)];
+  }
+  const t = esc(r.tool.name);
+  if (r.kind === "label") return [`Worn label · ${r.tool.name}`, `<div class="row">${back}<h2 class="grow" style="align-self:center">How does the label look?</h2></div>
+    <div class="row grow">${["Faded", "Scratched", "Peeling", "Torn"].map(c => `<button class="grow" data-act="rlabel" data-arg="${c}">${c}</button>`).join("")}</div>
+    <p class="muted small">It goes on the reprint list. You can keep using the tool.</p>`];
+  if (r.kind === "spot") return [`Not in its spot · ${r.tool.name}`, `<div class="row">${back}</div>
+    <h2 class="grow" style="display:flex;align-items:center">${t} isn't where it belongs. Send this to the instructors?</h2>
+    <button class="amber" data-act="rsend">Send report</button>`];
+  const sev = [["minor", "Minor", ""], ["needs_inspection", "Needs inspection", "amber"], ["safety_hazard", "Safety hazard", "red"]];
+  return [`Damaged · ${r.tool.name}`, `<div class="row">${back}${sev.map(([v, l, c]) => `<button class="grow sm ${c} ${r.severity === v ? "on" : ""}" data-act="rsev" data-arg="${v}">${l}</button>`).join("")}</div>
+    <div class="chips">${TAGS.map(g => `<button class="sm ${r.tags.includes(g) ? "blue" : ""}" data-act="rtag" data-arg="${esc(g)}">${esc(g)}</button>`).join("")}</div>
+    <div class="row" style="margin-top:auto;align-items:center"><div class="grow small">${r.severity && r.severity !== "minor" ? "The tool will be locked until an instructor checks it. " : ""}Hold the damage up to the camera, then tap Send.</div>
+    <button class="red" data-act="rsend" ${r.severity ? "" : "disabled style='opacity:.4'"}>Send 📷</button></div>`];
+}
+
+// Instructor mode (K7, K14, K16, K17)
+function instHome() {
+  return [`Instructor · ${st.instructor}`, `${msgBar("Scan a student's ID to help them, or pick a job")}
+    <div class="row grow"><button class="grow blue" data-act="ipage" data-arg="start">Start for a student<div class="small">ID won't scan</div></button>
+      <button class="grow" data-act="ipage" data-arg="enroll">Link a new badge</button></div>
+    <div class="row grow"><button class="grow" data-act="ipage" data-arg="loans">Loans &amp; due times</button>
+      <button class="grow amber" data-act="ipage" data-arg="quarantine">Release a locked tool</button>
+      <button class="grow red" data-act="logout">Log out</button></div>
+    ${st.enroll_for ? `<div class="card blue">Hold ${esc(st.enroll_for)}'s new card up to the camera now.</div>` : ""}`];
+}
+
+function instPage() {
+  const p = ui.inst, back = `<button class="sm" data-act="iback">‹ Back</button>`;
+  if (p.page === "asset") return ["Type the engraved asset number", picker(back, "Asset number, like HHA-0001", null, null,
+    `<button class="sm green" data-act="iasset">Add</button>`)];
+  if (p.page === "start" || p.page === "enroll") {
+    if (p.person) return [`Start for ${p.person.name}`, `<div class="row">${back}</div>
+      <div class="row grow"><button class="grow blue" data-act="istart" data-arg="out">Check out</button><button class="grow green" data-act="istart" data-arg="in">Return</button></div>`];
+    return [p.page === "start" ? "Start for which student?" : "Link a badge for who?", picker(back, "Type a name", p.results,
+      x => `<button class="grow list-btn sm" data-act="iperson" data-arg="${esc(x.person_id)}"><span>${esc(x.name)}</span><span class="small muted">${esc(x.role)}</span></button>`)];
+  }
+  if (p.page === "loans") return ["Loans", `<div class="row">${back}<div class="grow" style="align-self:center">${msgBar("Tap to move a due time")}</div></div>
+    <div class="col grow scroll">${(p.results || []).map(l => `<div class="row" style="align-items:center;border-bottom:2px solid var(--line);padding-bottom:8px">
+      <div class="grow"><div class="n ${l.overdue ? "overdue" : ""}"><b>${esc(l.name)}</b>${l.overdue ? " · OVERDUE" : ""}</div>
+      <div class="small muted">${esc(l.holder || "?")} · due ${l.due_at ? esc(time(l.due_at)) : "?"}</div></div>
+      <button class="sm" data-act="iextend" data-arg="${esc(l.asset_id)}|1">+1 hour</button><button class="sm" data-act="iextend" data-arg="${esc(l.asset_id)}|24">+1 day</button></div>`).join("")
+      || `<p class="muted">No tools are checked out.</p>`}</div>`];
+  if (p.page === "quarantine") {
+    if (p.tool) return [`Release ${p.tool.name}`, `<div class="row">${back}<h2 class="grow" style="align-self:center">What did you check?</h2></div>
+      ${NOTES.map(n => `<button class="grow" data-act="iclear" data-arg="${esc(n)}">${esc(n)}</button>`).join("")}`];
+    return ["Locked tools", `<div class="row">${back}</div><div class="col grow scroll">${(p.results || []).map(t =>
+      `<button class="list-btn sm" data-act="iqtool" data-arg="${esc(t.asset_id)}"><span>${esc(t.name)}</span><span class="small muted">${esc(t.asset_id)}</span></button>`).join("")
+      || `<p class="muted">No tools are waiting for inspection.</p>`}</div>`];
+  }
+}
+
+// Search box + up to 3 matches + on-screen keyboard. Only for instructor and report screens.
+function picker(back, ph, results, item, extra = "") {
+  const q = (ui.report?.step === "tool" ? ui.report : ui.inst).q || "";
+  const keys = KEYS.map(k => `<button data-act="key" data-arg="${k}">${k}</button>`).join("")
+    + `<button class="w2" data-act="key" data-arg=" ">space</button><button data-act="key" data-arg="⌫">⌫</button>`;
+  return `<div class="row">${back}<div class="field" data-ph="${esc(ph)}">${esc(q)}</div>${extra}</div>
+    ${item ? `<div class="row" style="min-height:64px">${(results || []).slice(0, 3).map(item).join("") || `<div class="muted small" style="align-self:center">No match</div>`}</div>` : ""}
+    <div class="kb">${keys}</div>`;
+}
+
+// ---------- drawing ----------
+function render() {
+  const [title, body] = view();
+  $("hdr").hidden = title === null;
+  $("htitle").textContent = title || "";
+  $("hlogo").src = logo;
+  const html = body;
+  if (html !== lastHtml) { $("main").innerHTML = html; lastHtml = html; }
+  $("main").style.padding = title === null ? "0" : "";
+  tick();
+}
+function tick() {
+  $("clock").textContent = new Date().toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+  const s = st?.session, fill = $("fill");
+  if (fill && s) {
+    const left = Math.ceil(st.seconds_left ?? 0);
+    fill.style.width = `${100 * left / st.idle_timeout}%`;
+    fill.className = left <= 10 ? "low" : "";
+    $("secs").textContent = left <= 15 ? `Saving in ${left} s. Scan or tap to keep going.` : `${left} s`;
+  }
+  if (ui.locked && $("lockleft")) {
+    const ms = Math.max(0, new Date(ui.locked.until) - Date.now()), m = Math.floor(ms / 60000), sec = Math.floor(ms / 1000) % 60;
+    $("lockleft").textContent = `${m}:${String(sec).padStart(2, "0")}`;
+    if (Date.now() - ui.locked.at > 30000) { ui.locked = null; render(); }
+  }
+  if ((ui.report || ui.inst) && Date.now() - lastTap > 60000) { ui.report = ui.inst = null; render(); }  // walked away mid-report
+}
+function showSummary(r) {
+  ui.summary = r; ui.msg = null; flash("ok");
+  clearTimeout(ui.sumTimer); ui.sumTimer = setTimeout(() => { ui.summary = null; render(); }, r.action === "in" ? 25000 : 12000);
+}
+
+// ---------- buttons ----------
+async function search() {
+  const p = ui.report?.step === "tool" ? ui.report : ui.inst;
+  if (!p || p.page === "asset") return;
+  const q = encodeURIComponent((p.q || "").trim());
+  if (ui.report) p.results = await call("GET", `/api/tools?q=${q}`);
+  else if (p.page === "start" || p.page === "enroll") p.results = await call("GET", `/api/instructor/people?q=${q}`);
+  else if (p.page === "loans") p.results = await call("GET", "/api/loans");
+  else if (p.page === "quarantine") p.results = (await call("GET", "/api/tools")).filter(t => t.state === "quarantined");
+  render();
+}
+const acts = {
+  mode: a => go(() => call("POST", "/api/mode", {action: a}).then(() => { ui.msg = null; })),
+  pin: k => {
+    if (k === "Cancel") { ui.pin = ""; return go(() => st.instructor_pin ? call("POST", "/api/instructor/logout") : call("DELETE", "/api/session")); }
+    ui.pin = k === "⌫" ? ui.pin.slice(0, -1) : (ui.pin + k).slice(0, 4);
+    render();
+    if (ui.pin.length === 4) { const pin = ui.pin; ui.pin = ""; go(() => call("POST", "/api/pin", {pin})); }
+  },
+  remove: id => go(() => call("POST", "/api/session/remove", {asset_id: id}).then(() => say("Removed from your list"))),
+  done: () => go(async () => {
+    const r = await call("POST", "/api/session/finish");
+    if (r.items.length) { ui.seenSaved = r.session_id; showSummary(r); } else say("Nothing was scanned, so nothing was saved.", "warn");
+  }),
+  cancel: () => {
+    if (st.session.items.length && ui.cancelArm < Date.now()) { ui.cancelArm = Date.now() + 4000; render(); return setTimeout(render, 4100); }
+    ui.cancelArm = 0; go(() => call("DELETE", "/api/session").then(() => say("Cancelled. Nothing was saved.", "warn")));
+  },
+  kitpiece: arg => { const [kit, id] = arg.split("|"); ui.kitMissing ??= {}; const m = ui.kitMissing[kit] ??= [];
+    m.includes(id) ? m.splice(m.indexOf(id), 1) : m.push(id); render(); },
+  kitok: kit => go(() => call("POST", "/api/session/kit", {kit_id: kit, missing: ui.kitMissing?.[kit] || []})
+    .then(r => say(r.missing.length ? `Noted: ${r.missing.length} piece${r.missing.length === 1 ? "" : "s"} not back` : "All pieces back", r.missing.length ? "warn" : "ok"))),
+  closesum: () => { ui.summary = null; render(); },
+  closelock: () => { ui.locked = null; render(); },
+  // report a problem
+  report: () => { ui.report = {step: "type", tags: [], q: ""}; ui.inst = null; render(); },
+  closereport: () => { ui.report = null; render(); },
+  rback: () => { const r = ui.report; r.step = r.step === "detail" ? "tool" : "type"; render(); },
+  rtype: k => { Object.assign(ui.report, {kind: k, step: "tool", q: ""}); render(); search(); },
+  rtool: id => { const r = ui.report; r.tool = [...(st.session?.items || []), ...(r.results || [])].find(t => t.asset_id === id); r.step = "detail"; render(); },
+  rsev: v => { ui.report.severity = v; render(); },
+  rtag: g => { const t = ui.report.tags; t.includes(g) ? t.splice(t.indexOf(g), 1) : t.push(g); render(); },
+  rlabel: c => sendReport("/api/label", {condition: c}),
+  rsend: () => ui.report.kind === "spot" ? sendReport("/api/problem", {})
+    : sendReport("/api/damage", {severity: ui.report.severity, tags: ui.report.tags}),
+  // instructor
+  logout: () => go(() => call("POST", "/api/instructor/logout")),
+  asset: () => { ui.inst = {page: "asset", q: ""}; render(); },
+  ipage: p => { ui.inst = {page: p, q: ""}; render(); search(); },
+  iback: () => { const p = ui.inst; if (p.person || p.tool) { p.person = p.tool = null; render(); } else { ui.inst = null; render(); } },
+  iperson: id => { const p = ui.inst, who = p.results.find(x => x.person_id === id);
+    if (p.page === "enroll") go(() => call("POST", "/api/instructor/enroll", {person_id: id}).then(() => { ui.inst = null; }));
+    else { p.person = who; render(); } },
+  istart: a => go(() => call("POST", "/api/instructor/start", {person_id: ui.inst.person.person_id, action: a}).then(() => { ui.inst = null; })),
+  iasset: () => go(() => call("POST", "/api/instructor/manual", {asset_id: ui.inst.q.trim()}).then(() => { ui.inst = null; })),
+  iextend: arg => { const [id, h] = arg.split("|"), l = ui.inst.results.find(x => x.asset_id === id);
+    const from = Math.max(Date.now(), l.due_at ? new Date(l.due_at) : 0), due = new Date(from + h * 3600000).toISOString();
+    go(() => call("POST", "/api/instructor/extend", {asset_id: id, due_at: due, reason: `Extended ${h === "1" ? "1 hour" : "1 day"} at the kiosk`})
+      .then(r => { say(`${l.name} now due ${time(r.due_at)}`); return search(); })); },
+  iqtool: id => { ui.inst.tool = ui.inst.results.find(t => t.asset_id === id); render(); },
+  iclear: note => go(() => call("POST", "/api/instructor/clear", {asset_id: ui.inst.tool.asset_id, note})
+    .then(() => { say(`${ui.inst.tool.name} can be checked out again`); ui.inst = {page: "quarantine", q: ""}; return search(); })),
+  key: k => { const p = ui.report?.step === "tool" ? ui.report : ui.inst;
+    p.q = k === "⌫" ? (p.q || "").slice(0, -1) : ((p.q || "") + k).slice(0, 30); render(); search(); },
+};
+function sendReport(url, extra) {
+  const r = ui.report;
+  go(() => call("POST", url, {asset_id: r.tool.asset_id, ...extra}).then(res => {
+    ui.report = null;
+    say(res.quarantined ? `Thanks. ${res.tool} is locked until an instructor checks it.` : `Thanks. Your report about ${res.tool} was sent.`);
+  }));
+}
+document.addEventListener("click", e => {
+  lastTap = Date.now();
+  const b = e.target.closest("[data-act]");
+  if (b && !b.disabled) acts[b.dataset.act]?.(b.dataset.arg);
+});
+document.addEventListener("contextmenu", e => e.preventDefault());  // long-press menus
+poll(); setInterval(poll, 1000);
 </script>
 </body>
 </html>

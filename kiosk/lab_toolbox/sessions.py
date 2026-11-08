@@ -523,6 +523,7 @@ class Kiosk:
             raise Rejected("Instructors only")
         self._refuse_if_locked(person)
         self.pending_instructor = person
+        self.instructor_seen = self.clock()  # else the idle check logs the badge out before the PIN is typed
         return {"instructor_pin": "setup" if not person["pin_hash"] else "check", "name": person["name"]}
 
     def _staff(self) -> dict:
