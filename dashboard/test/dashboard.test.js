@@ -28,8 +28,11 @@ function load(tabs, email = 'boss@lab.org', owner = 'owner@lab.org') {
     SpreadsheetApp: { getActive: () => ({ getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = new FakeSheet(n, [])) }) },
     Session: { getActiveUser: () => ({ getEmail: () => email }), getEffectiveUser: () => ({ getEmail: () => owner }), getScriptTimeZone: () => 'UTC' },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    Utilities: { getUuid: () => 'aaaa-bbbb', formatDate: (d, tz, f) => (f === 'Z' ? '+0000' : d.toISOString().slice(0, 10)) },
+    Utilities: { getUuid: () => 'aaaa-bbbb', formatDate: (d, tz, f) => ({ Z: '+0000', u: String(d.getUTCDay() || 7), H: String(d.getUTCHours()) }[f] ?? d.toISOString().slice(0, 10)) },
     MailApp: { sendEmail: (o) => sent.push(o) },
+    props: {},
+    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/X/exec' }), getProjectTriggers: () => [] },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => ctx.props[k] ?? null, setProperties: (o) => Object.assign(ctx.props, o) }) },
   };
   vm.createContext(ctx);
   for (const f of fs.readdirSync(path.join(__dirname, '..')).filter((f) => f.endsWith('.gs')).sort()) {
@@ -199,4 +202,49 @@ test('calibration saves boxes on one reference photo and gives each spot one too
   assert.deepStrictEqual([...tools.map((t) => t.spot_id)], ['', 'LOC-S01-B01-H01', 'LOC-S01-B01-H03']);
   g.api('requestReference');
   assert.ok(g.toObjects(g.sheets.Settings.rows).some((r) => r.key === 'reference_request'));
+});
+
+test('missing-tool alerts are emailed once, to the instructor on duty', () => {
+  const alerts = [['alert_id', 'opened', 'type', 'status', 'tool_name', 'asset_id', 'spot_label', 'last_person_name', 'snapshot_photo'],
+    ['a1', iso(5), 'missing_tool', 'open', 'Drill', 'HHA-2', 'Shelf 1 hook 2', 'Jordan', 'https://drive.google.com/file/d/SNAPabcdefgh/view'],
+    ['a2', iso(5), 'check_camera', 'open', '', '', 'Shelf 1', '', ''],
+    ['a3', iso(5), 'missing_tool', 'resolved', 'Saw', 'HHA-3', 'x', '', '']];
+  const g = load({ People: PEOPLE, Alerts: alerts, Settings: [['key', 'value']] });
+  assert.strictEqual(g.emailNewAlerts(), 0);  // nobody to tell yet: stays pending
+  g.sheets.Settings.rows.push(['alert_email', 'rivera@lab.org, night@lab.org']);
+  assert.strictEqual(g.emailNewAlerts(), 1);
+  assert.strictEqual(g.emailNewAlerts(), 0);
+  assert.strictEqual(g.sent.length, 1);
+  assert.strictEqual(g.sent[0].to, 'rivera@lab.org,night@lab.org');
+  assert.match(g.sent[0].subject, /Missing tool: Drill \(HHA-2\) at Shelf 1 hook 2/);
+  assert.match(g.sent[0].htmlBody, /Jordan/);
+  assert.match(g.sent[0].htmlBody, /Cage snapshot/);
+  assert.ok(g.toObjects(g.sheets.Alerts.rows)[0].emailed_at);
+});
+
+test('morning digest goes out once on weekdays at the digest hour', () => {
+  const dmg = [['report_id', 'asset_id', 'reported_by', 'severity', 'notes', 'opened', 'photo'], ['d1', 'HHA-3', 'P-1', 'safety_hazard', 'cracked <guard>', iso(60), '']];
+  const yesterday = new Date(Date.now() - 24 * 3600000).toISOString().slice(0, 10);
+  const g = load({ People: PEOPLE, Tools: TOOLS, Transactions: TXNS, DamageReports: dmg,
+    ReprintQueue: [['reprint_id', 'asset_id', 'condition', 'printed'], ['r1', 'HHA-1', 'Faded', 'no']],
+    Reconciliations: [['date', 'instructor', 'spots_confirmed', 'exceptions'], [yesterday, 'Ms. Rivera', 40, '']],
+    Settings: [['key', 'value'], ['digest_email', 'boss@lab.org'], ['digest_hour', '7']] });
+  const RealDate = Date;
+  const at = (s) => { g.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [s])); } static now() { return new RealDate(s).getTime(); } }; };
+  at('2026-11-07T07:10:00Z');  // Saturday
+  assert.strictEqual(g.morningDigest(), null);
+  at('2026-11-09T06:10:00Z');  // Monday, too early
+  assert.strictEqual(g.morningDigest(), null);
+  at('2026-11-09T07:10:00Z');  // Monday 7 AM: sends, once
+  assert.ok(g.morningDigest());
+  assert.strictEqual(g.morningDigest(), null);
+  g.Date = RealDate;
+  g.props = {};  // as if no digest had gone out yet
+  const m = g.morningDigest(true);
+  assert.match(m.subject, /2 out, 1 overdue, 0 open alerts/);
+  assert.match(m.htmlBody, /signed off by Ms. Rivera, 40 spots OK/);
+  assert.match(m.htmlBody, /cracked &lt;guard&gt;/);  // Sheet text is escaped
+  assert.match(m.htmlBody, /Multimeter \(HHA-1\): Faded/);
+  assert.match(m.htmlBody, /Saw \(HHA-3\)/);
+  assert.strictEqual(g.sent.length, 2);
 });

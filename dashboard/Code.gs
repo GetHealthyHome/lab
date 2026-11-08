@@ -223,6 +223,14 @@ var API = {
     return API.calibration.run(me);
   } },
 
+  installEmails: { supervisor: true, run: function () { installTriggers(); return { ok: true }; } },  // D9, D10 (Mail.gs)
+
+  testDigest: { supervisor: true, run: function () {  // "Send a digest now" on the Settings page
+    var m = morningDigest(true);
+    if (!m) throw new Error('Add an address to digest_email first.');
+    return { subject: m.subject };
+  } },
+
   health: { run: function () {  // D8
     var snaps = read_('Snapshots').sort(function (a, b) { return ms(b.ts) - ms(a.ts); });
     return { health: read_('Health'), snapshots: snaps.slice(0, 10), request: settingsMap(read_('Settings')).snapshot_request || '' };

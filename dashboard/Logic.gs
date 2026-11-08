@@ -255,3 +255,80 @@ function checkValue(schema, field, value) {
   }
   return '';
 }
+
+// -- emails (D9, D10) --------------------------------------------------------------------------------
+
+function recipients(v) {
+  return String(v || '').split(/[,;\s]+/).filter(function (e) { return /.+@.+/.test(e); }).join(',');
+}
+
+/** D9: open missing-tool alerts that haven't been emailed yet. */
+function alertsToEmail(alerts) {
+  return openAlerts(alerts).filter(function (a) { return a.type === 'missing_tool' && !a.emailed_at; });
+}
+
+function alertEmail(a, url) {
+  var esc = htmlEsc;
+  var link = function (href, text) { return href && driveId(href) ? '<a href="' + esc(href) + '">' + text + '</a>' : ''; };
+  var tool = (a.tool_name || 'A tool') + (a.asset_id ? ' (' + a.asset_id + ')' : '');
+  return {
+    subject: 'Missing tool: ' + tool + ' at ' + (a.spot_label || a.spot_id),
+    htmlBody: '<p><b>' + esc(tool) + '</b> is not on ' + esc(a.spot_label || a.spot_id) + ', and the records say it should be.</p>' +
+      '<p>Last checked out by <b>' + esc(a.last_person_name || a.last_person_id || 'nobody on record') + '</b>' +
+      (a.last_checkout ? ' at ' + esc(a.last_checkout) : '') + '.</p><p>' +
+      [link(a.snapshot_photo, 'Cage snapshot'), link(a.gate_photo, 'Gate photo'), url ? '<a href="' + esc(url) + '">Open the dashboard</a>' : '']
+        .filter(String).join(' · ') + '</p>',
+  };
+}
+
+/** D10: everything the morning digest reports. sinceMs: when the last digest went out (new damage is counted from then). */
+function digestData(d, now, sinceMs, lastNight) {
+  var out = toolsOut(d, now);
+  var open = openAlerts(d.alerts);
+  var tools = indexBy(d.tools, 'asset_id'), people = indexBy(d.people, 'person_id');
+  var recs = (d.reconciliations || []).filter(function (r) { return String(r.date).slice(0, 10) === lastNight; });
+  return {
+    out_count: out.length, open_alerts: open.length,
+    overdue: out.filter(function (o) { return o.overdue; }),
+    missing: open.filter(function (a) { return a.type === 'missing_tool'; }),
+    damage: (d.damage || []).filter(function (r) { return ms(r.opened) > sinceMs; }).map(function (r) {
+      return Object.assign({}, r, { tool: (tools[r.asset_id] || {}).name || r.asset_id, reporter: (people[r.reported_by] || {}).name || r.reported_by || '' });
+    }),
+    quarantined: quarantineList(d),
+    labels: reprintQueue(d),
+    reconciliation: recs.length ? recs[recs.length - 1] : null,
+    last_night: lastNight,
+  };
+}
+
+function digestEmail(g, url) {
+  var esc = htmlEsc;
+  var list = function (title, rows, fn) {
+    return '<h3 style="margin:16px 0 4px">' + esc(title) + ' (' + rows.length + ')</h3>' +
+      (rows.length ? '<ul>' + rows.map(function (r) { return '<li>' + fn(r) + '</li>'; }).join('') + '</ul>' : '<p style="color:#666">None</p>');
+  };
+  var photo = function (href) { return href && driveId(href) ? ' · <a href="' + esc(href) + '">photo</a>' : ''; };
+  var rec = g.reconciliation;
+  return {
+    subject: 'Lab Toolbox: ' + g.out_count + ' out, ' + g.overdue.length + ' overdue, ' + g.open_alerts + ' open alert' + (g.open_alerts === 1 ? '' : 's'),
+    htmlBody: '<p><b>' + g.out_count + '</b> tools out · <b>' + g.open_alerts + '</b> open alerts</p>' +
+      '<p>Last night’s check (' + esc(g.last_night) + '): ' + (rec ? 'signed off by ' + esc(rec.instructor) + ', ' + esc(rec.spots_confirmed) + ' spots OK' +
+        (rec.exceptions ? '. Exceptions: ' + esc(rec.exceptions) : '') : '<b style="color:#c62828">not signed off</b>') + '</p>' +
+      list('Overdue', g.overdue, function (o) { return esc(o.name) + ' (' + esc(o.asset_id) + '), ' + esc(o.person) + ', due ' + esc(o.due_at); }) +
+      list('Missing-tool alerts', g.missing, function (a) {
+        return esc(a.tool_name || a.asset_id) + ' at ' + esc(a.spot_label || a.spot_id) + ', last out with ' + esc(a.last_person_name || a.last_person_id || 'nobody on record') + photo(a.snapshot_photo);
+      }) +
+      list('New damage reports', g.damage, function (r) {
+        return esc(r.tool) + ': ' + esc(String(r.severity).replace(/_/g, ' ')) + (r.notes ? ', ' + esc(r.notes) : '') + (r.reporter ? ' (' + esc(r.reporter) + ')' : '') + photo(r.photo);
+      }) +
+      list('Quarantined', g.quarantined, function (t) { return esc(t.name) + ' (' + esc(t.asset_id) + ')' + (t.reports[0] ? photo(t.reports[0].photo) : ''); }) +
+      list('Labels to reprint', g.labels, function (r) { return esc(r.name) + ' (' + esc(r.asset_id) + '): ' + esc(r.condition); }) +
+      (url ? '<p><a href="' + esc(url) + '">Open the dashboard</a></p>' : ''),
+  };
+}
+
+function htmlEsc(v) {
+  return String(v === undefined || v === null ? '' : v).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
