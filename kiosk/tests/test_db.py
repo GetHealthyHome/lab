@@ -21,7 +21,8 @@ def test_migrate_is_idempotent(tmp_path):
 
 def _txn(conn, action, txn_id="t1"):
     conn.execute(
-        "INSERT INTO transactions VALUES (?, '2026-11-08T00:00:00+00:00', 'HHA-0001', 'P-1', ?, 's1', NULL, NULL, 'gate-1')",
+        "INSERT INTO transactions (txn_id, ts, asset_id, person_id, action, session_id, kiosk_id)"
+        " VALUES (?, '2026-11-08T00:00:00+00:00', 'HHA-0001', 'P-1', ?, 's1', 'gate-1')",
         (txn_id, action),
     )
 

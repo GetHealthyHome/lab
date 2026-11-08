@@ -3,7 +3,7 @@ name = "lab-toolbox-kiosk"
 version = "0.1.0"
 description = "Lab Toolbox checkout kiosk (Raspberry Pi): FastAPI + SQLite"
 requires-python = ">=3.11"
-dependencies = ["fastapi", "uvicorn", "numpy", "pillow"]
+dependencies = ["fastapi", "uvicorn", "numpy", "pillow", "argon2-cffi"]
 
 [project.optional-dependencies]
 pi = ["zxing-cpp", "picamera2", "gpiozero", "google-auth", "requests"]

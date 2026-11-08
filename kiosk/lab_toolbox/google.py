@@ -10,20 +10,26 @@ import sqlite3
 from typing import Any
 from urllib.parse import quote
 
-from .db import tx
+from .db import now_iso, tx
+from .sync import pending
 
 SHEETS = "https://sheets.googleapis.com/v4/spreadsheets"
 DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # Outbox kind -> Sheet tab. "photo" goes to Drive instead.
-TABS = {"transaction": "Transactions", "snapshot": "Snapshots", "alert": "Alerts", "audit": "AuditLog"}
+TABS = {"transaction": "Transactions", "snapshot": "Snapshots", "alert": "Alerts", "audit": "AuditLog",
+        "reference": "References", "person": "People", "tool": "Tools", "kit": "Kits", "damage": "DamageReports",
+        "reprint": "ReprintQueue", "extension": "Extensions"}
+HEALTH_TAB = "Health"
 # Payload fields that hold a local photo path; swapped for the Drive link before the row is written.
 PHOTO_FIELDS = ("gate_photo", "photo", "snapshot_photo", "reference_photo")
 # Kinds whose rows are updated in place (by this key) instead of appended again (C6).
-UPSERT_KEYS = {"alert": "alert_id"}
-# Columns the dashboard owns: an update from the kiosk never overwrites them.
-DASHBOARD_FIELDS = {"status", "resolved_by", "resolution_note"}
+# person/tool/kit payloads carry only the cells the kiosk changed (a PIN, a new badge, quarantine).
+UPSERT_KEYS = {"alert": "alert_id", "person": "person_id", "tool": "asset_id", "kit": "kit_id", "damage": "report_id"}
+# Columns the dashboard owns, per kind: an update from the kiosk never overwrites them.
+DASHBOARD_FIELDS = {"alert": {"status", "resolved_by", "resolution_note", "emailed_at"}}
+TRUTHY_TOOL_FIELDS = ("needs_battery", "is_battery")
 ALERT_STATUSES = ("open", "acknowledged", "resolved", "false_alarm")
 
 
@@ -58,7 +64,13 @@ class GoogleSink:
         for f in PHOTO_FIELDS:
             if row.get(f):
                 row[f] = self._link_for(row[f])
-        self._append(TABS[kind], row, UPSERT_KEYS.get(kind))
+        self._append(TABS[kind], row, UPSERT_KEYS.get(kind), DASHBOARD_FIELDS.get(kind, set()))
+
+    def report_health(self, kiosk_id: str) -> None:
+        """D8: one Health row per kiosk, rewritten after every push, so the dashboard sees when it last heard from us."""
+        last = self.conn.execute("SELECT MAX(ts) FROM snapshots").fetchone()[0]
+        self._append(HEALTH_TAB, {"kiosk_id": kiosk_id, "last_sync": now_iso(), "queue_size": pending(self.conn),
+                                  "last_snapshot": last}, "kiosk_id")
 
     def _upload_photo(self, path: str) -> None:
         if self.conn.execute("SELECT 1 FROM drive_photos WHERE path = ?", (path,)).fetchone():
@@ -88,7 +100,7 @@ class GoogleSink:
         row = self.conn.execute("SELECT link FROM drive_photos WHERE path = ?", (path,)).fetchone()
         return row["link"] if row else path
 
-    def _append(self, tab: str, row: dict[str, Any], key: str | None = None) -> None:
+    def _append(self, tab: str, row: dict[str, Any], key: str | None = None, keep: set[str] = frozenset()) -> None:
         header = self._header(tab)
         missing = [k for k in row if k not in header]
         if missing:  # new field from a later kiosk version: add the column instead of dropping data
@@ -100,10 +112,12 @@ class GoogleSink:
             k = header.index(key)
             for i, old in enumerate(self._get(tab)[1:], start=2):
                 if k < len(old) and str(old[k]) == str(row[key]):
-                    old = list(old) + [""] * (len(header) - len(old))
-                    values = [old[c] if col in DASHBOARD_FIELDS or col not in row else _cell(row[col])
-                              for c, col in enumerate(header)]
-                    self._put(f"{tab}!A{i}", [values])
+                    # Only our own cells are written, so a dashboard edit made a moment ago is never put back.
+                    data = [{"range": f"{tab}!{_col(c)}{i}", "values": [[_cell(row[col])]]}
+                            for c, col in enumerate(header) if col in row and col not in keep]
+                    r = self.http.post(f"{SHEETS}/{self.sheet_id}/values:batchUpdate",
+                                       json={"valueInputOption": "RAW", "data": data})
+                    self._ok(r)
                     return
         values = [_cell(row.get(col)) for col in header]
         r = self.http.post(
@@ -126,6 +140,14 @@ class GoogleSink:
         dashboard's answer on each alert. Returns rows per tab."""
         spots, tools, people = self._records("Spots", "spot_id"), self._records("Tools", "asset_id"), self._records("People", "person_id")
         settings, alerts = self._records("Settings", "key"), self._records("Alerts", "alert_id")
+        # D7 corrections staff made on the dashboard, like "record it as returned"
+        fixes = [t for t in self._records("Transactions", "txn_id", optional=True) or [] if t.get("kiosk_id") == "dashboard"]
+        # Batteries and kits (K12, K13, D13): optional tabs, so a Sheet set up before them still syncs.
+        groups = self._records("BatteryGroups", "group_id", optional=True) or []
+        kits = self._records("Kits", "kit_id", optional=True) or []
+        kit_items = self._records("KitItems", "kit_id", optional=True)
+        # The calibration page stores the reference photo's Drive link; the Pi compares against its own copy.
+        local = {r["link"]: r["path"] for r in self.conn.execute("SELECT link, path FROM drive_photos")}
         with tx(self.conn):  # all three or none, so a half-read Sheet never leaves tools pointing at missing spots
             for s in spots:
                 self.conn.execute(
@@ -133,27 +155,27 @@ class GoogleSink:
                     " ON CONFLICT(spot_id) DO UPDATE SET label=excluded.label, box=excluded.box,"
                     " reference_photo=excluded.reference_photo",
                     {"spot_id": s["spot_id"], "label": s.get("label") or s["spot_id"],
-                     "box": s.get("box") or None, "reference_photo": s.get("reference_photo") or None},
+                     "box": s.get("box") or None,
+                     "reference_photo": local.get(s.get("reference_photo"), s.get("reference_photo")) or None},
                 )
             for t in tools:
                 # Sheet status may say out/missing; locally those come from transactions and alerts, not this column.
                 status = t.get("status") if t.get("status") in ("quarantined", "retired") else "available"
+                cols = ("qr_code", "name", "category", "spot_id", "status", "notes", "serial", "brand", "model",
+                        "needs_battery", "battery_group_id", "is_battery")
+                row = {c: (t.get(c) or None) for c in cols}
+                row.update(asset_id=t["asset_id"], qr_code=t["qr_code"], name=t["name"], status=status,
+                           **{c: _truthy(t.get(c, "")) for c in TRUTHY_TOOL_FIELDS})
                 self.conn.execute(
-                    "INSERT INTO tools (asset_id, qr_code, name, category, spot_id, status, notes)"
-                    " VALUES (:asset_id, :qr_code, :name, :category, :spot_id, :status, :notes)"
-                    " ON CONFLICT(asset_id) DO UPDATE SET qr_code=excluded.qr_code, name=excluded.name,"
-                    " category=excluded.category, spot_id=excluded.spot_id, status=excluded.status, notes=excluded.notes",
-                    {"asset_id": t["asset_id"], "qr_code": t["qr_code"], "name": t["name"],
-                     "category": t.get("category") or None, "spot_id": t.get("spot_id") or None,
-                     "status": status, "notes": t.get("notes") or None},
-                )
+                    f"INSERT INTO tools (asset_id, {', '.join(cols)}) VALUES (:asset_id, {', '.join(':' + c for c in cols)})"
+                    f" ON CONFLICT(asset_id) DO UPDATE SET {', '.join(f'{c}=excluded.{c}' for c in cols)}", row)
             for p in people:
                 self.conn.execute(
-                    "INSERT INTO people (person_id, id_code, name, role, pin_hash, active)"
-                    " VALUES (:person_id, :id_code, :name, :role, :pin_hash, :active)"
+                    "INSERT INTO people (person_id, id_code, name, role, pin_hash, active, email)"
+                    " VALUES (:person_id, :id_code, :name, :role, :pin_hash, :active, :email)"
                     " ON CONFLICT(person_id) DO UPDATE SET id_code=excluded.id_code, name=excluded.name,"
-                    " role=excluded.role, pin_hash=excluded.pin_hash, active=excluded.active",
-                    {"person_id": p["person_id"], "id_code": p["id_code"], "name": p["name"],
+                    " role=excluded.role, pin_hash=excluded.pin_hash, active=excluded.active, email=excluded.email",
+                    {"person_id": p["person_id"], "id_code": p["id_code"], "name": p["name"], "email": p.get("email") or None,
                      "role": (p.get("role") or "student").lower(), "pin_hash": p.get("pin_hash") or None,
                      "active": _truthy(p.get("active", True))},
                 )
@@ -165,10 +187,43 @@ class GoogleSink:
                 if status in ALERT_STATUSES:
                     self.conn.execute("UPDATE alerts SET status = ?, resolution_note = ? WHERE alert_id = ?",
                                       (status, a.get("resolution_note") or None, a["alert_id"]))
+            for g in groups:
+                self.conn.execute("INSERT INTO battery_groups VALUES (?, ?) ON CONFLICT(group_id) DO UPDATE SET name=excluded.name",
+                                  (str(g["group_id"]), str(g.get("name") or g["group_id"])))
+            for k in kits:
+                self.conn.execute(
+                    "INSERT INTO kits (kit_id, case_code, name, spot_id, check_mode, status)"
+                    " VALUES (:kit_id, :case_code, :name, :spot_id, :check_mode, :status) ON CONFLICT(kit_id) DO UPDATE SET"
+                    " case_code=excluded.case_code, name=excluded.name, spot_id=excluded.spot_id,"
+                    " check_mode=excluded.check_mode, status=excluded.status",
+                    {"kit_id": k["kit_id"], "case_code": k["case_code"], "name": k.get("name") or k["kit_id"],
+                     "spot_id": k.get("spot_id") or None,
+                     "check_mode": "verified" if str(k.get("check_mode")).lower() == "verified" else "standard",
+                     "status": "incomplete" if str(k.get("status")).lower() == "incomplete" else "available"})
+            if kit_items is not None:  # the dashboard can remove pieces, so the tab replaces the local list
+                self.conn.execute("DELETE FROM kit_items")
+                for ki in kit_items:  # a row naming an unknown kit or tool is skipped, not fatal
+                    self.conn.execute("INSERT OR IGNORE INTO kit_items SELECT :kit_id, :asset_id"
+                                      " WHERE EXISTS (SELECT 1 FROM kits WHERE kit_id = :kit_id)"
+                                      " AND EXISTS (SELECT 1 FROM tools WHERE asset_id = :asset_id)",
+                                      {"kit_id": ki["kit_id"], "asset_id": ki.get("asset_id")})
+            for t in fixes:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO transactions (txn_id, ts, asset_id, person_id, action, session_id, gate_photo,"
+                    " override_by, kiosk_id) SELECT :txn_id, :ts, :asset_id, :person_id, :action, :session_id,"
+                    " NULL, (SELECT person_id FROM people WHERE person_id = :override_by), 'dashboard'"
+                    " WHERE EXISTS (SELECT 1 FROM tools WHERE asset_id = :asset_id)"
+                    " AND EXISTS (SELECT 1 FROM people WHERE person_id = :person_id) AND :action IN ('out', 'in')",
+                    {k: t.get(k) or None for k in ("txn_id", "ts", "asset_id", "person_id", "action", "session_id", "override_by")})
         return {"Spots": len(spots), "Tools": len(tools), "People": len(people), "Settings": len(settings)}
 
-    def _records(self, tab: str, key: str) -> list[dict[str, Any]]:
-        rows = self._get(tab)
+    def _records(self, tab: str, key: str, optional: bool = False) -> list[dict[str, Any]] | None:
+        try:
+            rows = self._get(tab)
+        except GoogleError:
+            if not optional:
+                raise
+            return None  # a tab that doesn't exist yet: nothing to copy, and nothing to remove
         if not rows:
             return []
         header = [str(c).strip() for c in rows[0]]
@@ -194,6 +249,16 @@ class GoogleSink:
         if r.status_code >= 300:
             raise GoogleError(f"HTTP {r.status_code}: {r.text[:300]}")
         return r.json() if r.content else {}
+
+
+def _col(i: int) -> str:
+    """0 -> A, 25 -> Z, 26 -> AA."""
+    s = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s = chr(65 + r) + s
+    return s
 
 
 def _cell(v: Any) -> Any:

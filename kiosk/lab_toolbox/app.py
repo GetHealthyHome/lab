@@ -16,7 +16,8 @@ from . import db, sync
 from .db import now_iso
 from .hardware import Buzzer
 from .reader import Watcher
-from .sessions import Kiosk, Rejected
+from . import loans
+from .sessions import Kiosk, Rejected, kits_view
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +32,59 @@ class ScanBody(BaseModel):
 
 
 class ModeBody(BaseModel):
-    action: str  # "out" | "in"
+    action: str  # "out" | "in" | "instructor"
+
+
+class PinBody(BaseModel):
+    pin: str
+
+
+class AssetBody(BaseModel):
+    asset_id: str
+
+
+class KitBody(BaseModel):
+    kit_id: str
+    missing: list[str] = []
+
+
+class DamageBody(BaseModel):
+    asset_id: str  # asset number or label code
+    severity: str  # minor | needs_inspection | safety_hazard
+    tags: list[str] = []
+    notes: str = ""
+    photo: bool = True
+
+
+class ProblemBody(BaseModel):
+    asset_id: str
+    notes: str = ""
+
+
+class LabelBody(BaseModel):
+    asset_id: str
+    condition: str  # Faded | Scratched | Peeling | Torn
+
+
+class ForBody(BaseModel):
+    person_id: str
+    action: str = "out"
+
+
+class EnrollBody(BaseModel):
+    person_id: str
+    code: str | None = None  # leave out to take the next scanned card
+
+
+class ExtendBody(BaseModel):
+    asset_id: str
+    due_at: str  # ISO date-time; no zone means kiosk local time
+    reason: str = ""
+
+
+class ClearBody(BaseModel):
+    asset_id: str
+    note: str
 
 
 def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = None) -> FastAPI:
@@ -64,7 +117,8 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
 
     @app.exception_handler(Rejected)
     async def rejected(_: Request, e: Rejected):
-        return JSONResponse({"reason": e.reason}, status_code=409)
+        # kind lets the screen pick the right look: rejected (red), wrong_battery (amber), locked (lock screen)
+        return JSONResponse({"reason": e.reason, "kind": e.sound, **e.details}, status_code=409)
 
     def k(request: Request) -> Kiosk:
         return request.app.state.kiosk
@@ -78,7 +132,10 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
         kiosk = k(request)
         s = kiosk.session
         return {
-            "session": s and {"id": s.id, "action": s.action, "person": s.person["name"], "items": s.items},
+            "session": s and {"id": s.id, "action": s.action, "person": s.person["name"], "items": s.items,
+                              "pin": s.pin, "kits": kits_view(s),
+                              "started_by": s.override_by and s.override_by["name"]},
+            **kiosk.state(),
             "seconds_left": kiosk.seconds_left(),
             "idle_timeout": kiosk.idle_timeout,
             # set when the idle timer saved a session, so the screen can still show the summary
@@ -90,7 +147,7 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
     @app.post("/api/mode")
     async def mode(body: ModeBody, request: Request):
         """The screen's Check out / Return buttons: which kind of session the next ID scan starts."""
-        if body.action not in ("out", "in"):
+        if body.action not in ("out", "in", "instructor"):
             raise Rejected("Choose Check out or Return")
         k(request).next_action = body.action
         return {"next_action": body.action}
@@ -103,16 +160,90 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
     @app.post("/api/session")
     async def start(body: StartBody, request: Request):
         request.app.state.last_saved = None
-        s = k(request).start(body.id_code, body.action)
-        return {"id": s.id, "action": s.action, "person": s.person["name"]}
+        kiosk = k(request)
+        return kiosk._started(kiosk.start(body.id_code, body.action))
 
     @app.post("/api/session/scan")
     async def scan(body: ScanBody, request: Request):
         return k(request).scan(body.code)
 
+    @app.post("/api/pin")
+    async def pin(body: PinBody, request: Request):
+        """K11: answers the PIN prompt on screen (a student's, or an instructor logging in)."""
+        return sounded(request.app, lambda: k(request).enter_pin(body.pin))
+
+    @app.post("/api/session/remove")
+    async def remove(body: AssetBody, request: Request):
+        return k(request).remove(body.asset_id)
+
+    @app.post("/api/session/kit")
+    async def confirm_kit(body: KitBody, request: Request):
+        """K13 return: confirm the kit's pieces; `missing` lists the ones that aren't back (standard kits)."""
+        return k(request).confirm_kit(body.kit_id, body.missing)
+
+    @app.post("/api/damage")
+    async def damage(body: DamageBody, request: Request):
+        return k(request).report_damage(body.asset_id, body.severity, body.tags, body.notes, body.photo)
+
+    @app.post("/api/problem")
+    async def problem(body: ProblemBody, request: Request):
+        """K8: tool not in its spot."""
+        return k(request).report_missing_from_spot(body.asset_id, body.notes)
+
+    @app.post("/api/label")
+    async def label(body: LabelBody, request: Request):
+        return k(request).flag_label(body.asset_id, body.condition)
+
+    @app.get("/api/tools")
+    async def tools(request: Request, q: str = ""):
+        """Pick a tool by name (for reports and worn labels, when the label won't scan)."""
+        like = f"%{q.strip()}%"
+        rows = k(request).conn.execute(
+            "SELECT asset_id, name, state, spot_id FROM tool_state WHERE state != 'retired' AND (name LIKE ? OR asset_id LIKE ?)"
+            " ORDER BY name LIMIT 50", (like, like)).fetchall()
+        return [dict(r) for r in rows]
+
+    @app.get("/api/loans")
+    async def get_loans(request: Request, person_id: str | None = None):
+        """K16: tools out with due times; `overdue` ones show red."""
+        kiosk = k(request)
+        return loans.loans(kiosk.conn, kiosk.wall(), person_id)
+
+    # -- instructor mode (K7, K14, K16, K17) --------------------------------
+
+    @app.get("/api/instructor/people")
+    async def people(request: Request, q: str = ""):
+        return k(request).find_people(q)
+
+    @app.post("/api/instructor/start")
+    async def start_for(body: ForBody, request: Request):
+        request.app.state.last_saved = None
+        return k(request).start_for(body.person_id, body.action)
+
+    @app.post("/api/instructor/manual")
+    async def manual(body: AssetBody, request: Request):
+        return sounded(request.app, lambda: k(request).add_by_asset(body.asset_id))
+
+    @app.post("/api/instructor/enroll")
+    async def enroll(body: EnrollBody, request: Request):
+        return k(request).enroll(body.person_id, body.code)
+
+    @app.post("/api/instructor/extend")
+    async def extend(body: ExtendBody, request: Request):
+        return k(request).extend(body.asset_id, body.due_at, body.reason)
+
+    @app.post("/api/instructor/clear")
+    async def clear(body: ClearBody, request: Request):
+        return k(request).clear_quarantine(body.asset_id, body.note)
+
+    @app.post("/api/instructor/logout")
+    async def logout(request: Request):
+        k(request).logout_instructor()
+        return {"ok": True}
+
     @app.post("/api/session/finish")
     async def finish(request: Request):
-        saved = k(request).finish()
+        saved = k(request).finish()  # refuses while a battery or kit check is unfinished (reason on screen)
         if saved["items"]:
             request.app.state.buzzer.play("saved")
         return saved
@@ -133,17 +264,43 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
 
 def handle_code(app: FastAPI, code: str) -> dict:
     """K1 feedback: every code gets a sound and an event the screen can show. Refusals still raise Rejected."""
+    return sounded(app, lambda: app.state.kiosk.handle(code))
+
+
+def sounded(app: FastAPI, act) -> dict:
+    """Run one kiosk action with the PRD's feedback: a sound plus an event (`kind` picks the look)."""
     seq = (app.state.last_event or {"seq": 0})["seq"] + 1
     try:
-        result = app.state.kiosk.handle(code)
+        result = act()
     except Rejected as e:
-        app.state.buzzer.play("rejected")
-        app.state.last_event = {"seq": seq, "ok": False, "text": e.reason, "at": now_iso()}
+        app.state.buzzer.play(e.sound)
+        app.state.last_event = {"seq": seq, "ok": False, "kind": e.sound, "text": e.reason, "at": now_iso(), **e.details}
         raise
     app.state.buzzer.play("accepted")
-    text = f"Hi, {result['person']}" if "person" in result else f"Added {result['name']}"
-    app.state.last_event = {"seq": seq, "ok": True, "text": text, "at": now_iso()}
+    app.state.last_event = {"seq": seq, "ok": True, "kind": "accepted", "text": _say(result), "at": now_iso()}
     return result
+
+
+def _say(r: dict) -> str:
+    if r.get("pin") in ("check", "setup"):
+        return f"Hi, {r['person']}. " + ("Enter your PIN" if r["pin"] == "check" else "Choose a 4-digit PIN")
+    if "instructor_pin" in r:
+        return f"{r['name']}: " + ("enter your PIN" if r["instructor_pin"] == "check" else "choose a 4-digit PIN")
+    if "instructor" in r:
+        return f"Instructor mode: {r['instructor']}"
+    if "enroll" in r:
+        return f"Scan {r['enroll']}'s new card" if r.get("waiting") else f"Card linked to {r['enroll']}"
+    if "person" in r and "id" in r:
+        return f"Hi, {r['person']}"
+    if "pieces" in r:
+        return f"Added {r['name']}"
+    if r.get("battery_needed"):
+        return f"Added {r['name']}. Now scan a {r['battery_needed']['group']} battery"
+    if r.get("paired_to"):
+        return f"Battery paired with {r['paired_to']}"
+    if "pin" in r:
+        return f"Hi, {r['person']}"
+    return f"Added {r.get('name', '')}".strip()
 
 
 async def _scan_loop(app: FastAPI, camera):

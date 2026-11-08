@@ -17,7 +17,9 @@ Open http://localhost:8000 for the placeholder screen. It is for bench testing o
 | Module | Job | PRD |
 | --- | --- | --- |
 | `db.py` | SQLite schema and migrations; WAL, synchronous NORMAL, foreign keys, 5 s busy timeout; append-only triggers on transactions, snapshots and audit log; `tool_state` view derives "out" from the latest transaction | Data model, Stability |
-| `sessions.py` | Checkout and return sessions: several tools per session, one gate photo per session, rejection rules, put-away spot on return, 45 s idle timeout that saves what was scanned | K2–K6, K9 |
+| `sessions.py` | Checkout and return sessions: several tools per session, one gate photo per session, rejection rules, put-away spot on return, 45 s idle timeout that saves what was scanned. Also PIN prompts, instructor mode, battery pairing, kits, damage and problem reports, worn labels | K2–K9, K11–K15, K17 |
+| `pins.py` | Argon2id PIN hashes; 5 wrong tries lock the ID for 15 minutes | K11 |
+| `loans.py` | Due time (earlier of loan length or closing time), grace period, overdue list, overdue hold | K16 |
 | `sync.py` | Outbox queued in the same DB transaction as the record; sends oldest first, stops at the first failure, deletes a local photo once sent | K10 |
 | `google.py` | Google side of sync: pushes queued rows to Sheet tabs (matched by header name, new columns added), photos to Drive (each Sheet row gets the Drive link, retries never upload twice), and pulls Spots, Tools and People back down all-or-nothing | K10, Sync to Google |
 | `sync_service.py` | Separate process: pushes every 30 s, pulls every 10 min, survives being offline | |
@@ -35,14 +37,28 @@ Open http://localhost:8000 for the placeholder screen. It is for bench testing o
 - `POST /api/mode` `{action: "out"|"in"}`: the Check out / Return buttons. The next ID scan starts that kind of session, then it goes back to "out".
 - `POST /api/code` `{code}`: one code, routed the way a camera scan is (an ID with no session open, otherwise a tool), with sound. A USB barcode scanner can use this too.
 - `DELETE /api/session` cancels.
+- `POST /api/pin` `{pin}` answers the PIN prompt on screen: a student's (`session.pin` is `check`, or `setup` the first time, when they choose one) or an instructor logging in.
+- `POST /api/session/remove` `{asset_id}` takes a tool back off the list. `POST /api/session/kit` `{kit_id, missing}` confirms a kit's pieces on return.
+- `POST /api/damage` `{asset_id, severity, tags, notes, photo}`, `POST /api/problem` `{asset_id, notes}` (tool not in its spot), `POST /api/label` `{asset_id, condition}` work from any screen. `asset_id` takes the engraved number or the label code; `GET /api/tools?q=` finds a tool by name.
+- `GET /api/loans` lists tools out with `due_at` and `overdue`.
+- Instructor mode: tap Instructor (`POST /api/mode {action: "instructor"}`) or scan an instructor badge during a student's session, then `POST /api/pin`. Then `POST /api/instructor/start` `{person_id, action}` (ID won't scan), `/manual` `{asset_id}` (label won't scan), `/enroll` `{person_id}` (the next scanned card becomes theirs), `/extend` `{asset_id, due_at}`, `/clear` `{asset_id, note}` (release from quarantine), `/logout`; `GET /api/instructor/people?q=`. Every one is logged in AuditLog with the instructor's name. An instructor who walks away is logged out after 90 seconds.
+
+Refusals are HTTP 409 `{reason, kind}`; `kind` is `rejected` (red flash), `wrong_battery` (amber, with `required` and `scanned`) or `locked` (lock screen, with `until`), and the buzzer plays the matching sound.
+
+How the new rules behave:
+- **PIN** (K11): on unless the `require_pin` setting is `no`. A person with no PIN chooses one on their next scan; a supervisor's PIN reset on the dashboard clears it so they choose again. Five wrong tries lock that ID for 15 minutes and open an `id_locked` alert.
+- **Batteries** (K12): a tool with `needs_battery` can't be saved until a battery of its `battery_group_id` is scanned. The scan reply lists which batteries fit and where the available ones sit. If the session times out, what was scanned is saved anyway: it left the cage.
+- **Kits** (K13): scanning a kit's case code adds every available piece (standard) or asks for each piece to be scanned (verified). On return, the student confirms the pieces; anything missing stays checked out, the kit is marked incomplete and a `kit_incomplete` alert opens.
+- **Damage** (K14): Needs inspection or Safety hazard quarantines the tool. It can still be returned, but not checked out until an instructor releases it (here or on the dashboard).
+- **Loans** (K16): due at the earlier of `loan_hours` (default 4) after checkout or `lab_close` (default 21:00, Pi local time); overdue after `grace_minutes` (default 15) more. With `hold_overdue` on (default), a student with an overdue tool can't start a checkout unless an instructor starts it for them.
 
 ## Connect to Google
 Like a mail carrier with a key to one mailbox: the Pi gets its own Google robot account that can only open the one Sheet and one folder you share with it.
 
 1. In Google Cloud console: create a project, enable the **Google Sheets API** and **Google Drive API**, create a **service account**, and download its JSON key. Keep the key only on the Pi (for example `/data/google-key.json`, readable by the kiosk user only).
-2. Create the Sheet with tabs `Transactions`, `Spots`, `Tools`, `People`, `Settings`, `Snapshots`, `Alerts` (plus `AuditLog` later). Every tab must exist, even empty, or the pull fails. Share it with the service account's email as **Editor**.
+2. Create the Sheet with tabs `Transactions`, `Spots`, `Tools`, `People`, `Settings`, `Snapshots`, `Alerts`, `AuditLog`. Every one of these must exist, even empty, or the pull fails. `BatteryGroups`, `Kits` and `KitItems` are read when they exist; `References`, `Health`, `DamageReports`, `ReprintQueue` and `Extensions` are created by the first row the kiosk sends. Share it with the service account's email as **Editor**.
 3. Put the photo folder in a **Shared Drive** and add the service account as a **Content manager**. A service account has no storage of its own, so uploads to a normal "My Drive" folder are refused.
-4. Header rows: `Spots`: `spot_id, label, box, reference_photo`. `Tools`: `asset_id, qr_code, name, category, spot_id, status, notes`. `People`: `person_id, id_code, name, role, pin_hash, active`. `Settings`: `key, value`. `Alerts`: at least `alert_id, status, resolution_note`. `Transactions`, `Snapshots` and the rest of `Alerts` can start empty: the kiosk writes its header on the first push, and any column order works after that.
+4. Header rows: `Spots`: `spot_id, label, box, reference_photo`. `Tools`: `asset_id, qr_code, name, category, spot_id, status, notes`. `People`: `person_id, id_code, name, role, pin_hash, active, email` (staff need `email` for the dashboard). Tools can also have `serial, brand, model, needs_battery, battery_group_id, is_battery`. `BatteryGroups`: `group_id, name`. `Kits`: `kit_id, case_code, name, spot_id, check_mode, status`. `KitItems`: `kit_id, asset_id`. `Settings`: `key, value`. `Alerts`: at least `alert_id, status, resolution_note`. `Transactions`, `Snapshots` and the rest of `Alerts` can start empty: the kiosk writes its header on the first push, and any column order works after that.
 5. Run it:
 ```bash
 pip install -e '.[pi]'
@@ -78,7 +94,7 @@ Like a guard who walks past the shelves on a timer. It takes a snapshot:
 - when the dashboard writes any new value into the `snapshot_request` setting (a timestamp is easiest). It runs after the next pull, so within about 10 minutes.
 - 1 minute after any snapshot that saw a problem. An alert only opens once two snapshots in a row agree (C7), so a hand reaching in is ignored.
 
-Spots need a `box` (`[x, y, w, h]` in reference-photo pixels) and a `reference_photo` that is a file on the Pi; spots without them are skipped until calibration (C2, not built yet) sets them. If the webcam fails, every spot reads "unclear" and turns into Check camera alerts. Run it on the Pi with `systemctl enable --now lab-toolbox-cage` (unit in `deploy/`), or on a bench with `KIOSK_DB=kiosk.db CAGE_CAMERA=/dev/video0 python -m lab_toolbox.cage`.
+Spots need a `box` (`[x, y, w, h]` in reference-photo pixels) and a `reference_photo`; spots without them are skipped until they are calibrated. Calibration (C2) happens on the dashboard's **Calibrate** page: it asks the Pi for a reference photo (the `reference_request` setting), the Pi takes one, keeps it in `PHOTO_DIR/references/` and sends a copy to Drive and the `References` tab, and the supervisor draws each spot's box on it. The Sheet stores the photo's Drive link; the Pi swaps it back for its own copy on the next pull. Retake the reference photo whenever the lighting or the camera changes. If the webcam fails, every spot reads "unclear" and turns into Check camera alerts. Run it on the Pi with `systemctl enable --now lab-toolbox-cage` (unit in `deploy/`), or on a bench with `KIOSK_DB=kiosk.db CAGE_CAMERA=/dev/video0 python -m lab_toolbox.cage`.
 
 ## Not built yet
-Cage calibration (C2), alert emails (D9), instructor PIN mode and the rest of K7–K17, the wrong-battery and ID-locked sounds, the kiosk screen itself, and a service that starts Chromium in kiosk mode.
+The kiosk screen itself (the API above is ready for it), a service that starts Chromium in kiosk mode, and deleting photos after the retention period.
