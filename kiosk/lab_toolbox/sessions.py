@@ -56,6 +56,7 @@ class Kiosk:
         self.clock = clock
         self.idle_timeout = idle_timeout
         self.session: Session | None = None
+        self.next_action = "out"  # the screen's Check out / Return choice for the next ID scan
 
     # -- session lifecycle -------------------------------------------------
 
@@ -71,6 +72,14 @@ class Kiosk:
             raise Rejected("ID not recognized. Ask an instructor for help.")
         self.session = Session(uuid.uuid4().hex, action, dict(person), last_activity=self.clock())
         return self.session
+
+    def handle(self, code: str) -> dict:
+        """One code from the gate camera: with no open session it's an ID, otherwise a tool."""
+        if self.session:
+            return self.scan(code)
+        s = self.start(code, self.next_action)
+        self.next_action = "out"
+        return {"id": s.id, "action": s.action, "person": s.person["name"]}
 
     def scan(self, code: str) -> dict:
         s = self._current()
