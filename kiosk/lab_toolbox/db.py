@@ -110,6 +110,8 @@ MIGRATIONS = [
     """,
     # Local photo path -> its Drive copy, so Sheet rows get the link and a retried upload is not duplicated.
     "CREATE TABLE drive_photos (path TEXT PRIMARY KEY, file_id TEXT NOT NULL, link TEXT NOT NULL)",
+    # Cage monitor: when an open alert was last confirmed by a snapshot (C6 updates instead of repeating).
+    "ALTER TABLE alerts ADD COLUMN last_seen TEXT",
 ]
 
 

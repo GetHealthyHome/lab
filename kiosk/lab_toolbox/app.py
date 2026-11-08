@@ -124,7 +124,9 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
 
     @app.get("/api/health")
     async def health(request: Request):
-        return {"kiosk_id": k(request).kiosk_id, "sync_pending": sync.pending(k(request).conn)}
+        conn = k(request).conn
+        last_snapshot = conn.execute("SELECT MAX(ts) FROM snapshots").fetchone()[0]  # D8
+        return {"kiosk_id": k(request).kiosk_id, "sync_pending": sync.pending(conn), "last_snapshot": last_snapshot}
 
     return app
 

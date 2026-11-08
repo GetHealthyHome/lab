@@ -20,6 +20,11 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 TABS = {"transaction": "Transactions", "snapshot": "Snapshots", "alert": "Alerts", "audit": "AuditLog"}
 # Payload fields that hold a local photo path; swapped for the Drive link before the row is written.
 PHOTO_FIELDS = ("gate_photo", "photo", "snapshot_photo", "reference_photo")
+# Kinds whose rows are updated in place (by this key) instead of appended again (C6).
+UPSERT_KEYS = {"alert": "alert_id"}
+# Columns the dashboard owns: an update from the kiosk never overwrites them.
+DASHBOARD_FIELDS = {"status", "resolved_by", "resolution_note"}
+ALERT_STATUSES = ("open", "acknowledged", "resolved", "false_alarm")
 
 
 class GoogleError(Exception):
@@ -53,7 +58,7 @@ class GoogleSink:
         for f in PHOTO_FIELDS:
             if row.get(f):
                 row[f] = self._link_for(row[f])
-        self._append(TABS[kind], row)
+        self._append(TABS[kind], row, UPSERT_KEYS.get(kind))
 
     def _upload_photo(self, path: str) -> None:
         if self.conn.execute("SELECT 1 FROM drive_photos WHERE path = ?", (path,)).fetchone():
@@ -83,13 +88,23 @@ class GoogleSink:
         row = self.conn.execute("SELECT link FROM drive_photos WHERE path = ?", (path,)).fetchone()
         return row["link"] if row else path
 
-    def _append(self, tab: str, row: dict[str, Any]) -> None:
+    def _append(self, tab: str, row: dict[str, Any], key: str | None = None) -> None:
         header = self._header(tab)
         missing = [k for k in row if k not in header]
         if missing:  # new field from a later kiosk version: add the column instead of dropping data
             header = header + missing
             self._put(f"{tab}!1:1", [header])
             self._headers[tab] = header
+        if key:
+            # shortcut: reads the whole tab to find the row; fine for the Alerts tab's size, revisit past ~10k rows.
+            k = header.index(key)
+            for i, old in enumerate(self._get(tab)[1:], start=2):
+                if k < len(old) and str(old[k]) == str(row[key]):
+                    old = list(old) + [""] * (len(header) - len(old))
+                    values = [old[c] if col in DASHBOARD_FIELDS or col not in row else _cell(row[col])
+                              for c, col in enumerate(header)]
+                    self._put(f"{tab}!A{i}", [values])
+                    return
         values = [_cell(row.get(col)) for col in header]
         r = self.http.post(
             f"{SHEETS}/{self.sheet_id}/values/{quote(tab)}!A1:append",
@@ -107,8 +122,10 @@ class GoogleSink:
     # -- pull ---------------------------------------------------------------
 
     def pull(self) -> dict[str, int]:
-        """Copy Spots, Tools and People down from the Sheet (supervisors edit them there). Returns rows per tab."""
+        """Copy Spots, Tools, People and Settings down from the Sheet (supervisors edit them there), plus the
+        dashboard's answer on each alert. Returns rows per tab."""
         spots, tools, people = self._records("Spots", "spot_id"), self._records("Tools", "asset_id"), self._records("People", "person_id")
+        settings, alerts = self._records("Settings", "key"), self._records("Alerts", "alert_id")
         with tx(self.conn):  # all three or none, so a half-read Sheet never leaves tools pointing at missing spots
             for s in spots:
                 self.conn.execute(
@@ -140,7 +157,15 @@ class GoogleSink:
                      "role": (p.get("role") or "student").lower(), "pin_hash": p.get("pin_hash") or None,
                      "active": _truthy(p.get("active", True))},
                 )
-        return {"Spots": len(spots), "Tools": len(tools), "People": len(people)}
+            for st in settings:
+                self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                                  (str(st["key"]), str(st.get("value", ""))))
+            for a in alerts:  # so the cage monitor opens a fresh alert once staff resolve the old one
+                status = str(a.get("status") or "").strip().lower().replace(" ", "_")
+                if status in ALERT_STATUSES:
+                    self.conn.execute("UPDATE alerts SET status = ?, resolution_note = ? WHERE alert_id = ?",
+                                      (status, a.get("resolution_note") or None, a["alert_id"]))
+        return {"Spots": len(spots), "Tools": len(tools), "People": len(people), "Settings": len(settings)}
 
     def _records(self, tab: str, key: str) -> list[dict[str, Any]]:
         rows = self._get(tab)

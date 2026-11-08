@@ -37,9 +37,11 @@ class FakeGoogle:
         return Resp({"values": rows[:1] if rng.endswith("1:1") else rows})
 
     def put(self, url, params=None, json=None):
-        tab, _ = self._tab(url)
+        tab, rng = self._tab(url)
         rows = self.tabs.setdefault(tab, [[]])
-        rows[0] = json["values"][0]
+        cell = rng.split("!")[1]
+        i = 0 if cell == "1:1" else int(cell.lstrip("A")) - 1
+        rows[i] = json["values"][0]
         return Resp({})
 
     def post(self, url, params=None, json=None, files=None):
@@ -143,7 +145,7 @@ def test_pull_updates_lists_from_sheet(conn):
             ["P-3", "ID-1003", "Ms. Rivera", "instructor", True],
         ],
     })
-    assert GoogleSink(g, conn, "S", "F").pull() == {"Spots": 1, "Tools": 2, "People": 2}
+    assert GoogleSink(g, conn, "S", "F").pull() == {"Spots": 1, "Tools": 2, "People": 2, "Settings": 0}
 
     tools = {r["asset_id"]: dict(r) for r in conn.execute("SELECT * FROM tools")}
     assert tools["HHA-0001"]["name"] == "Fluke multimeter" and tools["HHA-0001"]["status"] == "available"
@@ -162,3 +164,25 @@ def test_bad_pull_changes_nothing(conn):
     with pytest.raises(Exception):
         GoogleSink(g, conn, "S", "F").pull()
     assert conn.execute("SELECT name FROM tools WHERE asset_id = 'HHA-0001'").fetchone()[0] == "Digital multimeter"
+
+
+def test_alert_update_rewrites_its_row_but_keeps_dashboard_answer(conn):
+    g = FakeGoogle({"Alerts": [["alert_id", "type", "status", "resolution_note"]]})
+    sink = GoogleSink(g, conn, "S", "F")
+    sink.send("alert", {"alert_id": "A1", "type": "check_camera", "status": "open"})
+    g.tabs["Alerts"][1][2] = "acknowledged"  # instructor clicked Acknowledge on the dashboard
+    sink.send("alert", {"alert_id": "A1", "type": "missing_tool", "status": "open", "last_seen": "t2"})
+    assert g.tabs["Alerts"] == [["alert_id", "type", "status", "resolution_note", "last_seen"],
+                                ["A1", "missing_tool", "acknowledged", "", "t2"]]
+
+
+def test_pull_brings_settings_and_alert_answers(conn):
+    conn.execute("INSERT INTO alerts (alert_id, opened, type) VALUES ('A1', 't', 'missing_tool')")
+    g = FakeGoogle({
+        "Spots": [["spot_id"]], "Tools": [["asset_id"]], "People": [["person_id"]],
+        "Settings": [["key", "value"], ["snapshot_interval_hours", 3]],
+        "Alerts": [["alert_id", "status", "resolution_note"], ["A1", "False alarm", "my hand"], ["GONE", "resolved", ""]],
+    })
+    assert GoogleSink(g, conn, "S", "F").pull()["Settings"] == 1
+    assert conn.execute("SELECT value FROM settings WHERE key = 'snapshot_interval_hours'").fetchone()[0] == "3"
+    assert tuple(conn.execute("SELECT status, resolution_note FROM alerts").fetchone()) == ("false_alarm", "my hand")

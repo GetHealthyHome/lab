@@ -1,0 +1,19 @@
+# Cage monitor (USB webcam snapshots, missing-tool alerts). Copy to /etc/systemd/system/, then: systemctl enable --now lab-toolbox-cage
+[Unit]
+Description=Lab Toolbox cage monitor
+After=network.target
+
+[Service]
+User=kiosk
+# video: USB webcam access
+SupplementaryGroups=video
+WorkingDirectory=/opt/lab-toolbox/kiosk
+EnvironmentFile=/etc/lab-toolbox.env
+# Below the scan screen, so a snapshot comparison never makes a checkout feel slow on the Pi 3B+
+Nice=10
+ExecStart=/opt/lab-toolbox/kiosk/.venv/bin/python -m lab_toolbox.cage
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
