@@ -7,11 +7,33 @@ The Raspberry Pi service at the cage gate (see the Lab Toolbox PRD). It runs ful
 cd kiosk
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
-python -m lab_toolbox.seed kiosk.db          # demo IDs ID-1001, ID-1002; tools T-0001, T-0002
+python -m lab_toolbox.seed kiosk.db          # demo IDs ID-1001, ID-1002, instructor ID-9001; tools T-0001..T-0006, kit K-0001
 KIOSK_DB=kiosk.db uvicorn lab_toolbox.app:app --port 8000
 pytest
 ```
-Open http://localhost:8000 for the placeholder screen. It is for bench testing only: the real kiosk UI is not designed yet and will talk to the same API.
+Open http://localhost:8000 in a window sized 800x480 (the official 7" screen). With no camera on a bench, "scan" a code with
+`curl -X POST localhost:8000/api/code -H 'Content-Type: application/json' -d '{"code":"ID-1001"}'`.
+
+## The screen
+One lean page (`static/index.html`, no libraries) that only talks to the API below and asks it for the state once a second.
+Every event gets a color, words and (from the Pi's buzzer) a sound: green outline for a good scan, a red flash with the
+reason for a refusal, an amber border with the needed and scanned battery side by side, a red lock screen with a countdown.
+Buttons are at least 80 px (15 mm on the 7" screen); a normal checkout needs no typing. The on-screen keyboard only appears
+for instructor jobs and for finding a tool to report that isn't in your list.
+
+Screens: start (Check out / Return, Report a problem, Instructor) → PIN pad → scanning list with a 45 s countdown bar and a big
+Done → summary (due time, or a green RETURN TO banner per tool). Report a problem works from the start screen and from a
+session (damaged, not in its spot, worn label). Instructor mode: start a session for a student, type an asset number, link a
+new badge, move due times, release a locked tool.
+
+**Tool photos:** once a tool is labeled, an instructor taps **Take tool photos**, picks the tool and holds it up to the
+gate camera. The photo stays on the Pi (the screen must work offline) and a copy goes to Drive, with its link in a `photo`
+column on the Tools tab. It then shows as a thumbnail in the scanning list and beside the RETURN TO banner. Tools without
+a photo just show their name.
+
+**Logo:** put the lab's logo at `lab_toolbox/static/logo.png` (square, transparent background, about 400 px) and restart the
+service. It shows large on the start screen and small in the corner of every other screen. Until then a dashed "LAB LOGO"
+placeholder (`static/logo.svg`) holds the spot.
 
 ## What's here
 | Module | Job | PRD |
@@ -33,7 +55,7 @@ Open http://localhost:8000 for the placeholder screen. It is for bench testing o
 - `POST /api/session` `{id_code, action: "out"|"in"}` starts a session.
 - `POST /api/session/scan` `{code}` adds a tool. Refusals come back as HTTP 409 `{reason}` with text ready for the screen.
 - `POST /api/session/finish` saves it; returns include `return_to` for each tool.
-- `GET /api/session` gives the open session, `seconds_left` for the countdown bar, `auto_saved` when the idle timer saved one, and `last_event` (`{seq, ok, text}`) for the latest camera scan so the screen can flash green or red.
+- `GET /api/session` gives the open session (with kit piece names and, for a tool still waiting for a battery, which batteries fit and where they sit), `seconds_left` for the countdown bar, `auto_saved` when the idle timer saved one, and `last_event` (`{seq, ok, text}`) for the latest camera scan so the screen can flash green or red.
 - `POST /api/mode` `{action: "out"|"in"}`: the Check out / Return buttons. The next ID scan starts that kind of session, then it goes back to "out".
 - `POST /api/code` `{code}`: one code, routed the way a camera scan is (an ID with no session open, otherwise a tool), with sound. A USB barcode scanner can use this too.
 - `DELETE /api/session` cancels.
@@ -58,7 +80,7 @@ Like a mail carrier with a key to one mailbox: the Pi gets its own Google robot 
 1. In Google Cloud console: create a project, enable the **Google Sheets API** and **Google Drive API**, create a **service account**, and download its JSON key. Keep the key only on the Pi (for example `/data/google-key.json`, readable by the kiosk user only).
 2. Create the Sheet with tabs `Transactions`, `Spots`, `Tools`, `People`, `Settings`, `Snapshots`, `Alerts`, `AuditLog`. Every one of these must exist, even empty, or the pull fails. `BatteryGroups`, `Kits` and `KitItems` are read when they exist; `References`, `Health`, `DamageReports`, `ReprintQueue` and `Extensions` are created by the first row the kiosk sends. Share it with the service account's email as **Editor**.
 3. Put the photo folder in a **Shared Drive** and add the service account as a **Content manager**. A service account has no storage of its own, so uploads to a normal "My Drive" folder are refused.
-4. Header rows: `Spots`: `spot_id, label, box, reference_photo`. `Tools`: `asset_id, qr_code, name, category, spot_id, status, notes`. `People`: `person_id, id_code, name, role, pin_hash, active, email` (staff need `email` for the dashboard). Tools can also have `serial, brand, model, needs_battery, battery_group_id, is_battery`. `BatteryGroups`: `group_id, name`. `Kits`: `kit_id, case_code, name, spot_id, check_mode, status`. `KitItems`: `kit_id, asset_id`. `Settings`: `key, value`. `Alerts`: at least `alert_id, status, resolution_note`. `Transactions`, `Snapshots` and the rest of `Alerts` can start empty: the kiosk writes its header on the first push, and any column order works after that.
+4. Header rows: `Spots`: `spot_id, label, box, reference_photo`. `Tools`: `asset_id, qr_code, name, category, spot_id, status, notes` (the kiosk adds `photo`). `People`: `person_id, id_code, name, role, pin_hash, active, email` (staff need `email` for the dashboard). Tools can also have `serial, brand, model, needs_battery, battery_group_id, is_battery`. `BatteryGroups`: `group_id, name`. `Kits`: `kit_id, case_code, name, spot_id, check_mode, status`. `KitItems`: `kit_id, asset_id`. `Settings`: `key, value`. `Alerts`: at least `alert_id, status, resolution_note`. `Transactions`, `Snapshots` and the rest of `Alerts` can start empty: the kiosk writes its header on the first push, and any column order works after that.
 5. Run it:
 ```bash
 pip install -e '.[pi]'
@@ -97,4 +119,4 @@ Like a guard who walks past the shelves on a timer. It takes a snapshot:
 Spots need a `box` (`[x, y, w, h]` in reference-photo pixels) and a `reference_photo`; spots without them are skipped until they are calibrated. Calibration (C2) happens on the dashboard's **Calibrate** page: it asks the Pi for a reference photo (the `reference_request` setting), the Pi takes one, keeps it in `PHOTO_DIR/references/` and sends a copy to Drive and the `References` tab, and the supervisor draws each spot's box on it. The Sheet stores the photo's Drive link; the Pi swaps it back for its own copy on the next pull. Retake the reference photo whenever the lighting or the camera changes. If the webcam fails, every spot reads "unclear" and turns into Check camera alerts. Run it on the Pi with `systemctl enable --now lab-toolbox-cage` (unit in `deploy/`), or on a bench with `KIOSK_DB=kiosk.db CAGE_CAMERA=/dev/video0 python -m lab_toolbox.cage`.
 
 ## Not built yet
-The kiosk screen itself (the API above is ready for it), a service that starts Chromium in kiosk mode, and deleting photos after the retention period.
+A service that starts Chromium in kiosk mode, and deleting photos after the retention period.

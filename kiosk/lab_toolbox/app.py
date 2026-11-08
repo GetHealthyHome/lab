@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db, sync
@@ -20,6 +21,7 @@ from . import loans
 from .sessions import Kiosk, Rejected, kits_view
 
 log = logging.getLogger(__name__)
+STATIC = Path(__file__).parent / "static"
 
 
 class StartBody(BaseModel):
@@ -125,7 +127,9 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
 
     @app.get("/")
     async def screen():
-        return FileResponse(Path(__file__).parent / "static" / "index.html")
+        return FileResponse(STATIC / "index.html")
+
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")  # logo.png / logo.svg
 
     @app.get("/api/session")
     async def get_session(request: Request):
@@ -133,8 +137,11 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
         s = kiosk.session
         return {
             "session": s and {"id": s.id, "action": s.action, "person": s.person["name"], "items": s.items,
-                              "pin": s.pin, "kits": kits_view(s),
-                              "started_by": s.override_by and s.override_by["name"]},
+                              "pin": s.pin, "kits": _kits_named(kiosk, s),
+                              "started_by": s.override_by and s.override_by["name"],
+                              # K12: which batteries fit each tool still waiting for one, and where the charged ones sit
+                              "battery_options": {i["asset_id"]: kiosk._battery_options(i["needs_battery"])
+                                                  for i in s.items if i.get("needs_battery") and not i.get("battery")}},
             **kiosk.state(),
             "seconds_left": kiosk.seconds_left(),
             "idle_timeout": kiosk.idle_timeout,
@@ -236,6 +243,23 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
     async def clear(body: ClearBody, request: Request):
         return k(request).clear_quarantine(body.asset_id, body.note)
 
+    @app.post("/api/instructor/tool_photo")
+    async def tool_photo(body: AssetBody, request: Request):
+        return k(request).take_tool_photo(body.asset_id)
+
+    @app.get("/api/photos")
+    async def photos(request: Request):
+        """Tools with a photo on this Pi, {asset_id: version}; the screen only asks for these, so no 404s."""
+        rows = k(request).conn.execute("SELECT asset_id, photo FROM tools WHERE photo IS NOT NULL").fetchall()
+        return {r["asset_id"]: int(os.path.getmtime(r["photo"])) for r in rows if os.path.isfile(r["photo"])}
+
+    @app.get("/api/tools/{asset_id}/photo")
+    async def tool_photo_file(asset_id: str, request: Request):
+        row = k(request).conn.execute("SELECT photo FROM tools WHERE asset_id = ?", (asset_id,)).fetchone()
+        if not row or not row["photo"] or not os.path.isfile(row["photo"]):
+            return JSONResponse({"reason": "No photo"}, status_code=404)
+        return FileResponse(row["photo"])
+
     @app.post("/api/instructor/logout")
     async def logout(request: Request):
         k(request).logout_instructor()
@@ -260,6 +284,17 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
         return {"kiosk_id": k(request).kiosk_id, "sync_pending": sync.pending(conn), "last_snapshot": last_snapshot}
 
     return app
+
+
+def _kits_named(kiosk: Kiosk, s) -> list[dict]:
+    """kits_view plus piece names, so the screen can list what still has to come back (K13)."""
+    kits = kits_view(s)
+    ids = sorted({a for k in kits for a in k["waiting_for"]})
+    names = dict(kiosk.conn.execute(f"SELECT asset_id, name FROM tools WHERE asset_id IN ({','.join('?' * len(ids))})",
+                                    ids).fetchall()) if ids else {}
+    for k in kits:
+        k["waiting"] = [{"asset_id": a, "name": names.get(a, a)} for a in k["waiting_for"]]
+    return kits
 
 
 def handle_code(app: FastAPI, code: str) -> dict:

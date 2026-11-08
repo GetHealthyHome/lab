@@ -143,6 +143,14 @@ def test_badge_enroll_links_next_scanned_card(k, conn):
     assert queued(conn, "person")[-1] == {"person_id": "P-2", "id_code": "NEW-CARD-7"}
 
 
+def test_badge_scan_waits_for_the_pin(k, conn, clock):
+    clock.t += 1000  # a kiosk that has been up a while: the badge must not count as already idle
+    k.next_action = "instructor"
+    k.handle("ID-9")
+    k.expire_idle()
+    assert k.state()["instructor_pin"]
+
+
 def test_instructor_logs_out_after_walking_away(k, conn, clock):
     login(k, conn)
     clock.t += 200

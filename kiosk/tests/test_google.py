@@ -265,3 +265,24 @@ def test_kiosk_pin_change_writes_only_that_cell(conn):
     sink = GoogleSink(g, conn, "S", "F")
     sink.send("person", {"person_id": "P-1", "pin_hash": "$argon2id$abc"})
     assert g.tabs["People"][1] == ["P-1", "Jordan", "$argon2id$abc", "j@x.org"]
+
+
+def test_tool_photo_stays_on_pi_and_survives_a_pull(conn, tmp_path, clock):
+    conn.execute("INSERT INTO people (person_id, id_code, name, role) VALUES ('P-9', 'ID-9', 'Ms. Rivera', 'instructor')")
+    k = Kiosk(conn, "gate-1", camera=Cam(tmp_path / "drill.jpg"), clock=clock)
+    k.next_action = "instructor"
+    k.handle("ID-9")
+    k.enter_pin("9999")
+    assert k.take_tool_photo("HHA-0001")["name"] == "Digital multimeter"
+
+    g = FakeGoogle({"Tools": [["asset_id", "qr_code", "name", "spot_id"],
+                              ["HHA-0001", "T-0001", "Digital multimeter", "LOC-S03-B02-H04"]]})
+    sink = GoogleSink(g, conn, "S", "F")
+    sync.sync_once(conn, sink)
+    assert (tmp_path / "drill.jpg").exists()  # the screen still needs it
+    header, row = g.tabs["Tools"]
+    assert dict(zip(header, row))["photo"] == "https://drive.google.com/file/d/F1/view"
+
+    g.tabs.update(Spots=[["spot_id", "label"]], People=[["person_id"]])
+    sink.pull()
+    assert conn.execute("SELECT photo FROM tools WHERE asset_id = 'HHA-0001'").fetchone()[0] == str(tmp_path / "drill.jpg")
