@@ -197,7 +197,9 @@ var RENDER = {
   settings: function () {
     call('settings', {}, function (rows) {
       view('<h2>Settings</h2><div class="card"><table>' + rows.map(function (s) {
-        return '<tr><td><b>' + esc(s.key) + '</b><br><span class="muted">' + esc(s.help) + '</span></td><td><input id="set-' + esc(s.key) + '" value="' + esc(s.value) + '"></td></tr>';
+        return '<tr><td><b>' + esc(s.key) + '</b><br><span class="muted">' + esc(s.help) + '</span></td><td>' + (s.options
+          ? '<select id="set-' + esc(s.key) + '">' + s.options.map(function (o) { return '<option' + (o === s.value ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>'
+          : '<input id="set-' + esc(s.key) + '" value="' + esc(s.value) + '">') + '</td></tr>';
       }).join('') + '</table><p><button class="b primary" id="save">Save</button> <span class="muted">The kiosk picks changes up within 10 minutes.</span></p></div>' +
         '<div class="card"><h3>Emails</h3><p>Missing-tool emails go out within 5 minutes of the alert reaching the Sheet; the digest at digest_hour on weekdays. Turn them on once (you’ll be asked to allow sending email).</p>' +
         '<button class="b" id="emails">Turn on emails</button> <button class="b" id="digest">Send a digest now</button></div>');

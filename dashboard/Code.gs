@@ -177,7 +177,7 @@ var API = {
 
   settings: { run: function () {
     var m = settingsMap(read_('Settings'));
-    return DEFAULT_SETTINGS.map(function (s) { return { key: s[0], value: m[s[0]], help: s[2] }; });
+    return DEFAULT_SETTINGS.map(function (s) { return { key: s[0], value: m[s[0]], help: s[2], options: s[3] }; });
   } },
 
   saveSettings: { write: true, supervisor: true, run: function (me, a) {  // D14 and friends
@@ -186,6 +186,8 @@ var API = {
       var v = String(a.values[k]).trim();
       if (!DEFAULT_SETTINGS.some(function (s) { return s[0] === k; }) || v === String(current[k])) return;
       if (/_(hours|minutes|hour)$/.test(k) && !(parseFloat(v) >= 0)) throw new Error(k + ' must be a number.');
+      var opts = DEFAULT_SETTINGS.filter(function (s) { return s[0] === k; })[0][3];
+      if (opts && opts.indexOf(v) < 0) throw new Error(k + ' must be ' + opts.join(' or ') + '.');
       if (k === 'lab_close' && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) throw new Error('lab_close must look like 21:00.');
       setSetting_(k, v, me, 'Settings page');
     });
