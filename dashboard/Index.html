@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --muted: #5f6b7a; --line: #dde2e8; --accent: #1f6feb;
+          --red: #c62828; --red-bg: #fdecea; --amber: #a15c00; --amber-bg: #fff4e0; --green: #1b7f3b; --green-bg: #e7f6ec; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--ink); color: #fff; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  header b { font-size: 17px; margin-right: 8px; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button { background: transparent; color: #cfd6df; border: 0; padding: 6px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+  nav button.on, nav button:hover { background: #ffffff22; color: #fff; }
+  #who { margin-left: auto; color: #cfd6df; font-size: 13px; }
+  main { padding: 16px; max-width: 1200px; margin: 0 auto; }
+  h2 { margin: 4px 0 12px; font-size: 20px; }
+  h3 { margin: 18px 0 8px; font-size: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; min-width: 150px; }
+  .stat .n { font-size: 26px; font-weight: 600; }
+  .stat .l { color: var(--muted); font-size: 13px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; background: var(--card); }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  tr.overdue td { background: var(--red-bg); }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #eef1f4; }
+  .tag.red { background: var(--red-bg); color: var(--red); } .tag.amber { background: var(--amber-bg); color: var(--amber); }
+  .tag.green { background: var(--green-bg); color: var(--green); }
+  .muted { color: var(--muted); }
+  button.b, .b { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  button.b.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.b.danger { color: var(--red); }
+  input, select, textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+  img.thumb { max-width: 220px; max-height: 160px; border-radius: 6px; border: 1px solid var(--line); display: block; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+  #msg { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 10px 16px; border-radius: 8px;
+         background: var(--ink); color: #fff; display: none; max-width: 90vw; }
+  #msg.err { background: var(--red); }
+  .alert { border-left: 4px solid var(--red); }
+  .alert.check_camera { border-left-color: var(--amber); }
+  @media print { header, .noprint { display: none !important; } body { background: #fff; } .card { border: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <b>Lab Toolbox</b>
+  <nav id="nav"></nav>
+  <span id="who"></span>
+</header>
+<main id="view"><p class="muted">Loading…</p></main>
+<div id="msg"></div>
+
+<script>
+var VIEWS = [
+  ['home', 'Out now'], ['alerts', 'Alerts'], ['search', 'Search'], ['reconcile', 'Nightly check'], ['report', 'Day report'],
+  ['quarantine', 'Quarantine'], ['labels', 'Labels'], ['records', 'Records'], ['settings', 'Settings'], ['health', 'Kiosk'],
+];
+var ME = null;
+
+function esc(v) {
+  return String(v === undefined || v === null ? '' : v).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function when(v) {
+  var t = Date.parse(v);
+  return isNaN(t) ? esc(v) : new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function dur(min) { return min < 60 ? min + ' min' : Math.floor(min / 60) + ' h ' + (min % 60) + ' min'; }
+function driveId(link) {
+  var m = /\/d\/([\w-]{10,})/.exec(String(link)) || /[?&]id=([\w-]{10,})/.exec(String(link));
+  return m ? m[1] : null;
+}
+function photo(link, label) {
+  if (!link) return '<span class="muted">no photo</span>';
+  var id = driveId(link);
+  if (!id) return '<span class="muted">photo not uploaded yet</span>';
+  return '<a href="https://drive.google.com/file/d/' + id + '/view" target="_blank" title="' + esc(label || 'Open photo') + '">' +
+    '<img class="thumb" loading="lazy" src="https://drive.google.com/thumbnail?id=' + id + '&sz=w440" alt="' + esc(label || 'photo') + '"></a>';
+}
+function say(text, isErr) {
+  var m = document.getElementById('msg');
+  m.textContent = text; m.className = isErr ? 'err' : ''; m.style.display = 'block';
+  clearTimeout(say.t); say.t = setTimeout(function () { m.style.display = 'none'; }, isErr ? 7000 : 3000);
+}
+function call(name, args, done) {
+  google.script.run.withSuccessHandler(function (r) {
+    ME = r.me;
+    document.getElementById('who').textContent = r.me.name + ' · ' + r.me.role;
+    done(r.data);
+  }).withFailureHandler(function (e) { say(e.message || String(e), true); }).api(name, args || {});
+}
+function $(id) { return document.getElementById(id); }
+function view(html) { $('view').innerHTML = html; }
+
+function go(name) {
+  [].forEach.call($('nav').children, function (b) { b.className = b.dataset.v === name ? 'on' : ''; });
+  view('<p class="muted">Loading…</p>');
+  RENDER[name]();
+}
+
+var RENDER = {
+  home: function () {
+    call('home', {}, function (d) {
+      var overdue = d.out.filter(function (o) { return o.overdue; }).length;
+      view('<h2>Out right now</h2><div class="stats">' +
+        stat(d.out.length, 'tools out') + stat(overdue, 'overdue', overdue ? 'red' : '') + stat(d.open_alerts, 'open alerts', d.open_alerts ? 'red' : '') +
+        stat(d.last_snapshot ? when(d.last_snapshot) : 'never', 'last cage snapshot') + '</div>' +
+        (d.out.length ? '<div class="scroll"><table><tr><th>Tool</th><th>Who</th><th>Out for</th><th>Due</th><th>Battery / kit</th><th>Gate photo</th></tr>' +
+          d.out.map(function (o) {
+            return '<tr class="' + (o.overdue ? 'overdue' : '') + '"><td><b>' + esc(o.name) + '</b><br><span class="muted">' + esc(o.asset_id) + '</span></td>' +
+              '<td>' + esc(o.person) + '</td><td>' + dur(o.minutes_out) + '<br><span class="muted">since ' + when(o.since) + '</span></td>' +
+              '<td>' + (o.due_at ? when(o.due_at) : '<span class="muted">—</span>') + (o.overdue ? ' <span class="tag red">OVERDUE</span>' : '') + '</td>' +
+              '<td>' + esc(o.battery) + (o.kit_id ? ' kit ' + esc(o.kit_id) : '') + '</td><td>' + photo(o.gate_photo) + '</td></tr>';
+          }).join('') + '</table></div>' : '<div class="card">Every tool is in the cage.</div>'));
+    });
+  },
+
+  alerts: function () { call('alerts', {}, drawAlerts); },
+
+  search: function () {
+    view('<h2>Search</h2><div class="card noprint"><input id="q" placeholder="Student name or ID, tool name or asset number" style="width:420px">' +
+      ' <button class="b primary" onclick="doSearch()">Search</button></div><div id="results"></div>');
+    $('q').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(); });
+    $('q').focus();
+  },
+
+  reconcile: function () {
+    call('reconcile', {}, function (d) {
+      view('<h2>Nightly check ' + esc(d.today) + '</h2>' +
+        (d.signed.length ? '<div class="card"><span class="tag green">Signed off</span> by ' + esc(d.signed[d.signed.length - 1].instructor) +
+          ' at ' + when(d.signed[d.signed.length - 1].signed_at) + '. You can sign again if something changed.</div>' : '') +
+        '<p class="muted">Walk the cage. Each spot is pre-filled from the camera’s latest snapshot. Confirm it matches, or mark it and say what you found.</p>' +
+        '<div class="scroll"><table><tr><th>Spot</th><th>Tool</th><th>Records say</th><th>Camera saw</th><th>As recorded?</th><th>Note</th></tr>' +
+        d.rows.map(function (r, i) {
+          return '<tr><td><b>' + esc(r.label) + '</b><br><span class="muted">' + esc(r.spot_id) + '</span></td><td>' + esc(r.tool) + '</td>' +
+            '<td>' + esc(r.record) + '</td><td>' + (r.camera ? '<span class="tag ' + (r.ok ? 'green' : 'amber') + '">' + esc(r.camera) + '</span>' : '<span class="muted">not watched</span>') + '</td>' +
+            '<td><label><input type="checkbox" id="ok' + i + '"' + (r.ok !== false ? ' checked' : '') + '> yes</label></td>' +
+            '<td><input id="note' + i + '" placeholder="What you found"></td></tr>';
+        }).join('') + '</table></div><p><button class="b primary" id="sign">Sign off</button></p>');
+      $('sign').onclick = function () {
+        var entries = d.rows.map(function (r, i) { return { spot_id: r.spot_id, ok: $('ok' + i).checked, note: $('note' + i).value, camera: r.camera }; });
+        call('signOff', { entries: entries }, function (row) { say('Signed off: ' + row.spots_confirmed + ' spots OK'); go('reconcile'); });
+      };
+    });
+  },
+
+  report: function () {
+    call('report', {}, function (d) {
+      var rec = d.reconciliation;
+      view('<h2>End-of-day exceptions · ' + esc(d.date) + '</h2><p class="noprint"><button class="b primary" onclick="window.print()">Print</button></p>' +
+        '<div class="card"><h3>Nightly check</h3>' + (rec ? 'Signed by ' + esc(rec.instructor) + ' at ' + when(rec.signed_at) + ' · ' + esc(rec.spots_confirmed) + ' spots OK' +
+          (rec.exceptions ? '<br><b>Exceptions:</b> ' + esc(rec.exceptions) : '') : '<span class="tag red">Not signed off</span>') + '</div>' +
+        section('Still out', d.out, ['Tool', 'Who', 'Since', 'Due'], function (o) { return [o.name + ' (' + o.asset_id + ')', o.person, when(o.since), (o.due_at ? when(o.due_at) : '') + (o.overdue ? ' OVERDUE' : '')]; }) +
+        section('Alerts', d.alerts, ['Type', 'Spot', 'Tool', 'Last user', 'Status'], function (a) { return [label(a.type), a.spot_label || a.spot_id, a.tool_name || a.asset_id, a.last_person_name || a.last_person_id, a.status]; }) +
+        section('Damage reported today', d.damage, ['Tool', 'Severity', 'By', 'Notes'], function (r) { return [r.tool, label(r.severity), r.reporter, [r.tags, r.notes].filter(String).join(' · ')]; }) +
+        section('Quarantined', d.quarantined, ['Tool', 'Asset'], function (t) { return [t.name, t.asset_id]; }));
+    });
+  },
+
+  quarantine: function () { call('quarantine', {}, drawQuarantine); },
+
+  labels: function () {
+    call('reprints', {}, function (q) {
+      view('<h2>Label reprint queue</h2>' + (q.length ? '<p>' + q.length + ' label(s) waiting. <b>Print batch</b> downloads a CSV for the label printer’s software and marks them printed.</p>' +
+        '<div class="scroll"><table><tr><th></th><th>Tool</th><th>QR code</th><th>Spot</th><th>Condition</th><th>Flagged</th></tr>' +
+        q.map(function (r, i) {
+          return '<tr><td><input type="checkbox" id="lb' + i + '" checked></td><td><b>' + esc(r.name) + '</b><br><span class="muted">' + esc(r.asset_id) + '</span></td><td>' +
+            esc(r.qr_code) + '</td><td>' + esc(r.spot_id) + '</td><td>' + esc(r.condition) + '</td><td>' + when(r.flagged_at) + '</td></tr>';
+        }).join('') + '</table></div><p><button class="b primary" id="print">Print batch</button></p>' : '<div class="card">No worn labels flagged.</div>'));
+      if (!q.length) return;
+      $('print').onclick = function () {
+        var ids = q.filter(function (r, i) { return $('lb' + i).checked; }).map(function (r) { return r.asset_id; });
+        call('printBatch', { asset_ids: ids }, function (b) {
+          var a = document.createElement('a');
+          a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(b.csv);
+          a.download = 'label-batch-' + new Date().toISOString().slice(0, 10) + '.csv';
+          document.body.appendChild(a); a.click(); a.remove();
+          say(b.count + ' label(s) marked printed'); go('labels');
+        });
+      };
+    });
+  },
+
+  records: function () { records('Tools'); },
+
+  settings: function () {
+    call('settings', {}, function (rows) {
+      view('<h2>Settings</h2><div class="card"><table>' + rows.map(function (s) {
+        return '<tr><td><b>' + esc(s.key) + '</b><br><span class="muted">' + esc(s.help) + '</span></td><td><input id="set-' + esc(s.key) + '" value="' + esc(s.value) + '"></td></tr>';
+      }).join('') + '</table><p><button class="b primary" id="save">Save</button> <span class="muted">The kiosk picks changes up within 10 minutes.</span></p></div>');
+      $('save').onclick = function () {
+        var values = {};
+        rows.forEach(function (s) { values[s.key] = $('set-' + s.key).value; });
+        call('saveSettings', { values: values }, function () { say('Saved'); });
+      };
+    });
+  },
+
+  health: function () {
+    call('health', {}, function (d) {
+      var now = Date.now();
+      view('<h2>Kiosk health</h2>' + (d.health.length ? d.health.map(function (h) {
+        var stale = now - Date.parse(h.last_sync) > 15 * 60000;
+        return '<div class="card"><b>' + esc(h.kiosk_id) + '</b> ' + (stale ? '<span class="tag red">not heard from in a while</span>' : '<span class="tag green">online</span>') +
+          '<br>Last sync: ' + when(h.last_sync) + ' · Waiting to send: ' + esc(h.queue_size) + ' · Last cage snapshot: ' + when(h.last_snapshot) + '</div>';
+      }).join('') : '<div class="card">The kiosk hasn’t reported yet.</div>') +
+        '<p><button class="b primary" id="snap">Take a cage snapshot now</button> <span class="muted">' +
+        (d.request ? 'Last requested ' + when(d.request) + '. ' : '') + 'The kiosk takes it within about 10 minutes.</span></p>' +
+        section('Recent snapshots', d.snapshots, ['When', 'Why', 'Full', 'Empty', 'Unclear', 'Photo'], function (s) {
+          return [when(s.ts), label(s.reason), s.full, s.empty, s.unclear, { html: photo(s.photo) }];
+        }));
+      $('snap').onclick = function () { call('requestSnapshot', {}, function () { say('Snapshot requested'); go('health'); }); };
+    });
+  },
+};
+
+function stat(n, l, cls) { return '<div class="stat"><div class="n" style="color:' + (cls === 'red' ? 'var(--red)' : 'inherit') + '">' + n + '</div><div class="l">' + esc(l) + '</div></div>'; }
+function label(v) { return String(v || '').replace(/_/g, ' '); }
+function section(title, rows, head, cells) {
+  return '<div class="card"><h3>' + esc(title) + ' (' + rows.length + ')</h3>' + (rows.length ? '<div class="scroll"><table><tr>' +
+    head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr>' + rows.map(function (r) {
+      return '<tr>' + cells(r).map(function (c) { return '<td>' + (c && c.html !== undefined ? c.html : esc(c)) + '</td>'; }).join('') + '</tr>';
+    }).join('') + '</table></div>' : '<span class="muted">None</span>') + '</div>';
+}
+
+var ALERT_NAMES = { missing_tool: 'Missing tool', returned_without_scan: 'Returned without scanning', check_camera: 'Check camera',
+  damage: 'Damage report', not_in_spot: 'Tool not in its spot', kit_incomplete: 'Kit came back short', id_locked: 'ID locked (wrong PINs)' };
+
+var ALERTS = [];
+function drawAlerts(q) {
+  ALERTS = q.open;
+  function card(a, open, i) {
+    return '<div class="card alert ' + esc(a.type) + '"><div class="row"><div style="flex:1;min-width:260px">' +
+      '<b>' + esc(ALERT_NAMES[a.type] || label(a.type)) + '</b> <span class="tag ' + (open ? 'red' : '') + '">' + esc(label(a.status || 'open')) + '</span>' +
+      '<br>Spot: ' + esc(a.spot_label || a.spot_id || '—') + '<br>Tool: ' + esc(a.tool_name || '') + ' ' + esc(a.asset_id || '') +
+      '<br>Last checked out by: <b>' + esc(a.last_person_name || a.last_person_id || 'nobody on record') + '</b>' + (a.last_checkout ? ' at ' + when(a.last_checkout) : '') +
+      (a.details ? '<br>' + esc(a.details) : '') +
+      '<br><span class="muted">Opened ' + when(a.opened) + (a.last_seen ? ' · last seen ' + when(a.last_seen) : '') + '</span>' +
+      (a.resolution_note ? '<br>Note: ' + esc(a.resolution_note) : '') +
+      (open ? '<p class="noprint"><input id="n-' + i + '" placeholder="Note (what happened)" style="width:260px"><br>' +
+        btn('Acknowledge', i, 'acknowledged') + ' ' + btn('Resolve', i, 'resolved') + ' ' + btn('False alarm', i, 'false_alarm') +
+        (a.type === 'returned_without_scan' ? ' <button class="b" onclick="markReturned(' + i + ')">Record it as returned</button>' : '') + '</p>' : '') +
+      '</div><div>' + (a.snapshot_photo ? '<div class="muted">Cage</div>' + photo(a.snapshot_photo, 'Cage snapshot') : '') + '</div>' +
+      '<div>' + (a.gate_photo ? '<div class="muted">Gate</div>' + photo(a.gate_photo, 'Gate photo') : '') + '</div></div></div>';
+  }
+  view('<h2>Alerts</h2>' + (q.open.length ? q.open.map(function (a, i) { return card(a, true, i); }).join('') : '<div class="card">No open alerts.</div>') +
+    (q.closed.length ? '<h3>Recently closed</h3>' + q.closed.map(function (a) { return card(a, false); }).join('') : ''));
+}
+function btn(text, i, status) { return '<button class="b" onclick="alertAction(' + i + ',\'' + status + '\')">' + text + '</button>'; }
+function alertAction(i, status) {
+  call('alertAction', { alert_id: ALERTS[i].alert_id, status: status, note: $('n-' + i).value }, function (q) { say('Saved'); drawAlerts(q); });
+}
+function markReturned(i) {
+  var assetId = ALERTS[i].asset_id;
+  var reason = prompt('Record ' + assetId + ' as returned. Why? (for the audit log)');
+  if (reason) call('markReturned', { asset_id: assetId, reason: reason }, function () { say('Recorded as returned'); });
+}
+
+function doSearch() {
+  call('search', { q: $('q').value }, function (r) {
+    $('results').innerHTML =
+      section('People', r.people, ['Name', 'ID', 'Role'], function (p) { return [p.name, p.id_code, p.role]; }) +
+      section('Tools', r.tools, ['Tool', 'Asset', 'Spot', 'Status'], function (t) { return [t.name, t.asset_id, t.spot_id, t.status]; }) +
+      section('History', r.history, ['When', 'Action', 'Tool', 'Who', 'Override by', 'Gate photo'], function (h) {
+        return [when(h.ts), h.action === 'out' ? 'Checked out' : 'Returned', h.tool + ' (' + h.asset_id + ')', h.person, h.override_by, { html: photo(h.gate_photo) }];
+      }) +
+      section('Damage reports', r.damage, ['When', 'Tool', 'Severity', 'Notes', 'Photo'], function (d) {
+        return [when(d.opened), d.asset_id, label(d.severity), [d.tags, d.notes].filter(String).join(' · '), { html: photo(d.photo) }];
+      });
+  });
+}
+
+var QLIST = [];
+function drawQuarantine(list) {
+  QLIST = list;
+  view('<h2>Quarantine</h2>' + (list.length ? list.map(function (t, i) {
+    return '<div class="card alert"><b>' + esc(t.name) + '</b> <span class="muted">' + esc(t.asset_id) + '</span>' +
+      t.reports.map(function (r) {
+        return '<div class="row" style="margin-top:8px"><div style="flex:1"><span class="tag ' + (r.severity === 'safety_hazard' ? 'red' : 'amber') + '">' + esc(label(r.severity)) + '</span> ' +
+          esc([r.tags, r.notes].filter(String).join(' · ')) + '<br><span class="muted">Reported by ' + esc(r.reporter || 'unknown') + ' · ' + when(r.opened) + '</span></div>' + photo(r.photo, 'Damage photo') + '</div>';
+      }).join('') +
+      '<p><input id="q-' + i + '" placeholder="What you found" style="width:260px"> ' +
+      '<button class="b primary" onclick="triage(' + i + ',\'release\')">Release for use</button> ' +
+      '<button class="b danger" onclick="triage(' + i + ',\'retire\')">Retire it</button></p></div>';
+  }).join('') : '<div class="card">Nothing in quarantine.</div>'));
+}
+function triage(i, outcome) {
+  call('triage', { asset_id: QLIST[i].asset_id, outcome: outcome, note: $('q-' + i).value }, function (list) { say('Saved'); drawQuarantine(list); });
+}
+
+// -- Records: one editor for every table staff manage (D6, D7, D13) ----------------------------------
+var REC = null;
+function records(tab) {
+  call('records', { tab: tab }, function (r) {
+    REC = r;
+    var tabs = ['Tools', 'People', 'Spots', 'BatteryGroups', 'Kits', 'KitItems'];
+    var sup = ME.role === 'supervisor';
+    view('<h2>Records</h2><p class="noprint">' + tabs.map(function (t) {
+      return '<button class="b' + (t === tab ? ' primary' : '') + '" onclick="records(\'' + t + '\')">' + t + '</button>';
+    }).join(' ') + '</p>' + (sup ? '' : '<p class="muted">Only supervisors can change these.</p>') +
+      '<div class="scroll"><table><tr>' + r.cols.map(function (c) { return '<th>' + esc(c) + '</th>'; }).join('') +
+      (tab === 'People' ? '<th>PIN</th>' : '') + '<th></th></tr>' +
+      r.rows.map(function (row, i) {
+        return '<tr>' + r.cols.map(function (c) { return '<td>' + esc(row[c]) + '</td>'; }).join('') +
+          (tab === 'People' ? '<td>' + (row.has_pin ? 'set' : '<span class="muted">none</span>') + (sup && row.has_pin ? ' <button class="b" onclick="resetPin(' + i + ')">Reset</button>' : '') + '</td>' : '') +
+          '<td>' + (sup ? (r.deletable ? '<button class="b danger" onclick="delRec(' + i + ')">Remove</button>' : '<button class="b" onclick="editRec(' + i + ')">Edit</button>') : '') + '</td></tr>';
+      }).join('') + '</table></div>' + (sup ? '<p><button class="b primary" onclick="editRec(-1)">Add a row</button></p>' : '') + '<div id="editor"></div>');
+  });
+}
+function field(c, v) {
+  var ch = REC.choices[c];
+  if (ch) return '<select id="f-' + c + '"><option value=""></option>' + ch.map(function (o) { return '<option' + (String(v) === o ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>';
+  return '<input id="f-' + c + '" value="' + esc(v) + '"' + (c === REC.key && v !== '' ? ' disabled' : '') + '>';
+}
+function editRec(i) {
+  var row = i >= 0 ? REC.rows[i] : {};
+  $('editor').innerHTML = '<div class="card"><h3>' + (i >= 0 ? 'Edit ' + esc(row[REC.key] || '') : 'New ' + REC.tab + ' row') + '</h3><table>' +
+    REC.cols.map(function (c) { return '<tr><th>' + esc(c) + '</th><td>' + field(c, row[c] === undefined ? '' : row[c]) + '</td></tr>'; }).join('') +
+    '<tr><th>Why</th><td><input id="f-why" placeholder="' + (i >= 0 ? 'Required: why the change' : 'Optional') + '" style="width:320px"></td></tr></table>' +
+    '<p><button class="b primary" id="saveRec">Save</button></p></div>';
+  $('editor').scrollIntoView();
+  $('saveRec').onclick = function () {
+    var values = {};
+    REC.cols.forEach(function (c) { values[c] = $('f-' + c).value; });
+    call('saveRecord', { tab: REC.tab, isNew: i < 0, id: i >= 0 ? row[REC.key] : null, values: values, reason: $('f-why').value },
+      function () { say('Saved'); records(REC.tab); });
+  };
+}
+function delRec(i) {
+  var reason = prompt('Remove this row? Say why (for the audit log).');
+  if (reason) call('deleteRecord', { tab: REC.tab, values: REC.rows[i], reason: reason }, function () { say('Removed'); records(REC.tab); });
+}
+function resetPin(i) {
+  var reason = prompt('Reset ' + REC.rows[i].name + '’s PIN? They will choose a new one at the kiosk. Why?');
+  if (reason) call('resetPin', { person_id: REC.rows[i].person_id, reason: reason }, function () { say('PIN reset'); records('People'); });
+}
+
+VIEWS.forEach(function (v) {
+  var b = document.createElement('button');
+  b.textContent = v[1]; b.dataset.v = v[0]; b.onclick = function () { go(v[0]); };
+  $('nav').appendChild(b);
+});
+go('home');
+</script>
+</body>
+</html>

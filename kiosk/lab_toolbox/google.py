@@ -10,7 +10,8 @@ import sqlite3
 from typing import Any
 from urllib.parse import quote
 
-from .db import tx
+from .db import now_iso, tx
+from .sync import pending
 
 SHEETS = "https://sheets.googleapis.com/v4/spreadsheets"
 DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
@@ -18,12 +19,13 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 
 # Outbox kind -> Sheet tab. "photo" goes to Drive instead.
 TABS = {"transaction": "Transactions", "snapshot": "Snapshots", "alert": "Alerts", "audit": "AuditLog"}
+HEALTH_TAB = "Health"
 # Payload fields that hold a local photo path; swapped for the Drive link before the row is written.
 PHOTO_FIELDS = ("gate_photo", "photo", "snapshot_photo", "reference_photo")
 # Kinds whose rows are updated in place (by this key) instead of appended again (C6).
 UPSERT_KEYS = {"alert": "alert_id"}
-# Columns the dashboard owns: an update from the kiosk never overwrites them.
-DASHBOARD_FIELDS = {"status", "resolved_by", "resolution_note"}
+# Columns the dashboard owns, per kind: an update from the kiosk never overwrites them.
+DASHBOARD_FIELDS = {"alert": {"status", "resolved_by", "resolution_note", "emailed_at"}}
 ALERT_STATUSES = ("open", "acknowledged", "resolved", "false_alarm")
 
 
@@ -58,7 +60,13 @@ class GoogleSink:
         for f in PHOTO_FIELDS:
             if row.get(f):
                 row[f] = self._link_for(row[f])
-        self._append(TABS[kind], row, UPSERT_KEYS.get(kind))
+        self._append(TABS[kind], row, UPSERT_KEYS.get(kind), DASHBOARD_FIELDS.get(kind, set()))
+
+    def report_health(self, kiosk_id: str) -> None:
+        """D8: one Health row per kiosk, rewritten after every push, so the dashboard sees when it last heard from us."""
+        last = self.conn.execute("SELECT MAX(ts) FROM snapshots").fetchone()[0]
+        self._append(HEALTH_TAB, {"kiosk_id": kiosk_id, "last_sync": now_iso(), "queue_size": pending(self.conn),
+                                  "last_snapshot": last}, "kiosk_id")
 
     def _upload_photo(self, path: str) -> None:
         if self.conn.execute("SELECT 1 FROM drive_photos WHERE path = ?", (path,)).fetchone():
@@ -88,7 +96,7 @@ class GoogleSink:
         row = self.conn.execute("SELECT link FROM drive_photos WHERE path = ?", (path,)).fetchone()
         return row["link"] if row else path
 
-    def _append(self, tab: str, row: dict[str, Any], key: str | None = None) -> None:
+    def _append(self, tab: str, row: dict[str, Any], key: str | None = None, keep: set[str] = frozenset()) -> None:
         header = self._header(tab)
         missing = [k for k in row if k not in header]
         if missing:  # new field from a later kiosk version: add the column instead of dropping data
@@ -100,10 +108,12 @@ class GoogleSink:
             k = header.index(key)
             for i, old in enumerate(self._get(tab)[1:], start=2):
                 if k < len(old) and str(old[k]) == str(row[key]):
-                    old = list(old) + [""] * (len(header) - len(old))
-                    values = [old[c] if col in DASHBOARD_FIELDS or col not in row else _cell(row[col])
-                              for c, col in enumerate(header)]
-                    self._put(f"{tab}!A{i}", [values])
+                    # Only our own cells are written, so a dashboard edit made a moment ago is never put back.
+                    data = [{"range": f"{tab}!{_col(c)}{i}", "values": [[_cell(row[col])]]}
+                            for c, col in enumerate(header) if col in row and col not in keep]
+                    r = self.http.post(f"{SHEETS}/{self.sheet_id}/values:batchUpdate",
+                                       json={"valueInputOption": "RAW", "data": data})
+                    self._ok(r)
                     return
         values = [_cell(row.get(col)) for col in header]
         r = self.http.post(
@@ -126,6 +136,8 @@ class GoogleSink:
         dashboard's answer on each alert. Returns rows per tab."""
         spots, tools, people = self._records("Spots", "spot_id"), self._records("Tools", "asset_id"), self._records("People", "person_id")
         settings, alerts = self._records("Settings", "key"), self._records("Alerts", "alert_id")
+        # D7 corrections staff made on the dashboard, like "record it as returned"
+        fixes = [t for t in self._records("Transactions", "txn_id", optional=True) if t.get("kiosk_id") == "dashboard"]
         with tx(self.conn):  # all three or none, so a half-read Sheet never leaves tools pointing at missing spots
             for s in spots:
                 self.conn.execute(
@@ -165,10 +177,22 @@ class GoogleSink:
                 if status in ALERT_STATUSES:
                     self.conn.execute("UPDATE alerts SET status = ?, resolution_note = ? WHERE alert_id = ?",
                                       (status, a.get("resolution_note") or None, a["alert_id"]))
+            for t in fixes:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO transactions SELECT :txn_id, :ts, :asset_id, :person_id, :action, :session_id,"
+                    " NULL, (SELECT person_id FROM people WHERE person_id = :override_by), 'dashboard'"
+                    " WHERE EXISTS (SELECT 1 FROM tools WHERE asset_id = :asset_id)"
+                    " AND EXISTS (SELECT 1 FROM people WHERE person_id = :person_id) AND :action IN ('out', 'in')",
+                    {k: t.get(k) or None for k in ("txn_id", "ts", "asset_id", "person_id", "action", "session_id", "override_by")})
         return {"Spots": len(spots), "Tools": len(tools), "People": len(people), "Settings": len(settings)}
 
-    def _records(self, tab: str, key: str) -> list[dict[str, Any]]:
-        rows = self._get(tab)
+    def _records(self, tab: str, key: str, optional: bool = False) -> list[dict[str, Any]]:
+        try:
+            rows = self._get(tab)
+        except GoogleError:
+            if not optional:
+                raise
+            return []  # a tab the dashboard creates later; nothing to copy yet
         if not rows:
             return []
         header = [str(c).strip() for c in rows[0]]
@@ -194,6 +218,16 @@ class GoogleSink:
         if r.status_code >= 300:
             raise GoogleError(f"HTTP {r.status_code}: {r.text[:300]}")
         return r.json() if r.content else {}
+
+
+def _col(i: int) -> str:
+    """0 -> A, 25 -> Z, 26 -> AA."""
+    s = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s = chr(65 + r) + s
+    return s
 
 
 def _cell(v: Any) -> Any:

@@ -16,11 +16,18 @@ PUSH_SECONDS = 30   # PRD: the queue syncs within 5 minutes of reconnecting
 PULL_SECONDS = 600
 
 
-def run_once(conn, sink, do_pull: bool) -> None:
+def run_once(conn, sink, do_pull: bool, kiosk_id: str = "gate-1") -> bool:
+    """One round. Returns True if it pulled."""
     while (n := sync.sync_once(conn, sink)) == 100:  # full batch: keep going until the backlog is gone
         log.info("sent %d", n)
-    if do_pull:
-        log.info("pulled %s", sink.pull())
+    sink.report_health(kiosk_id)
+    if not do_pull:
+        return False
+    if sync.pending(conn):  # a change of ours not in the Sheet yet would be overwritten by the Sheet's old copy
+        log.info("pull waits: %d item(s) still to send", sync.pending(conn))
+        return False
+    log.info("pulled %s", sink.pull())
+    return True
 
 
 def main() -> None:
@@ -33,8 +40,7 @@ def main() -> None:
     while True:
         do_pull = time.monotonic() - last_pull >= PULL_SECONDS
         try:
-            run_once(conn, sink, do_pull)
-            if do_pull:
+            if run_once(conn, sink, do_pull, os.environ.get("KIOSK_ID", "gate-1")):
                 last_pull = time.monotonic()
         except Exception:  # offline or Google hiccup: the outbox keeps everything, try again next round
             log.exception("sync round failed (%d still queued)", sync.pending(conn))

@@ -47,6 +47,15 @@ class FakeGoogle:
     def post(self, url, params=None, json=None, files=None):
         if self.down:
             raise ConnectionError("offline")
+        if url.endswith(":batchUpdate"):
+            for d in json["data"]:
+                tab, cell = unquote(d["range"]).split("!")
+                col, row = "".join(ch for ch in cell if ch.isalpha()), int("".join(ch for ch in cell if ch.isdigit()))
+                c = sum((ord(ch) - 64) * 26 ** i for i, ch in enumerate(reversed(col))) - 1
+                r = self.tabs[tab][row - 1]
+                r.extend([""] * (c + 1 - len(r)))
+                r[c] = d["values"][0][0]
+            return Resp({})
         if files:
             meta = __import__("json").loads(files["metadata"][1])
             fid = f"F{len(self.files) + 1}"
@@ -186,3 +195,45 @@ def test_pull_brings_settings_and_alert_answers(conn):
     assert GoogleSink(g, conn, "S", "F").pull()["Settings"] == 1
     assert conn.execute("SELECT value FROM settings WHERE key = 'snapshot_interval_hours'").fetchone()[0] == "3"
     assert tuple(conn.execute("SELECT status, resolution_note FROM alerts").fetchone()) == ("false_alarm", "my hand")
+
+
+def test_health_row_is_one_per_kiosk(conn):
+    g = FakeGoogle()
+    sink = GoogleSink(g, conn, "S", "F")
+    sync.enqueue(conn, "transaction", {"txn_id": "a"})
+    sink.report_health("gate-1")
+    sink.report_health("gate-1")
+    header, *rows = g.tabs["Health"]
+    assert header == ["kiosk_id", "last_sync", "queue_size", "last_snapshot"] and len(rows) == 1
+    assert rows[0][0] == "gate-1" and rows[0][2] == 1
+
+
+def test_pull_takes_dashboard_returns_only(conn, clock):
+    k = Kiosk(conn, "gate-1", clock=clock)
+    k.start("ID-1001", "out")
+    k.scan("T-0001")
+    k.finish()
+    g = FakeGoogle({
+        "Spots": [["spot_id"]], "Tools": [["asset_id"]], "People": [["person_id"]],
+        "Transactions": [["txn_id", "ts", "asset_id", "person_id", "action", "session_id", "override_by", "kiosk_id"],
+                         ["D1", "2026-11-08T03:00:00+00:00", "HHA-0001", "P-1", "in", "dash-1", "boss@x.org", "dashboard"],
+                         ["D2", "2026-11-08T03:00:00+00:00", "NOPE", "P-1", "in", "dash-2", "", "dashboard"],
+                         ["G1", "2026-11-08T03:00:00+00:00", "HHA-0002", "P-1", "out", "s", "", "gate-1"]],
+    })
+    sink = GoogleSink(g, conn, "S", "F")
+    sink.pull()
+    sink.pull()  # twice: no duplicate
+    rows = conn.execute("SELECT txn_id, override_by FROM transactions WHERE kiosk_id = 'dashboard'").fetchall()
+    assert [tuple(r) for r in rows] == [("D1", None)]  # unknown tool skipped; an email isn't a person id
+    assert conn.execute("SELECT state FROM tool_state WHERE asset_id = 'HHA-0001'").fetchone()[0] == "available"
+
+
+def test_pull_waits_until_our_changes_are_sent(conn):
+    from lab_toolbox.sync_service import run_once
+
+    g = FakeGoogle({"Spots": [["spot_id"]], "Tools": [["asset_id"]], "People": [["person_id"]]})
+    sink = GoogleSink(g, conn, "S", "F")
+    sync.enqueue(conn, "mystery", {})  # can't be sent
+    assert run_once(conn, sink, do_pull=True) is False
+    conn.execute("DELETE FROM sync_queue")
+    assert run_once(conn, sink, do_pull=True) is True
