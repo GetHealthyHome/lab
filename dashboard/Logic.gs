@@ -250,7 +250,7 @@ function checkValue(schema, field, value) {
   if (field === 'box' && value !== '') {
     try {
       var b = JSON.parse(value);
-      if (!(b instanceof Array) || b.length !== 4 || b.some(function (n) { return typeof n !== 'number' || n < 0; })) throw 0;
+      if (!Array.isArray(b) || b.length !== 4 || b.some(function (n) { return typeof n !== 'number' || n < 0; })) throw 0;
     } catch (e) { return 'box must look like [x, y, width, height]'; }
   }
   return '';

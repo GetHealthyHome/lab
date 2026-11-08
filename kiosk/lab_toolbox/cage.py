@@ -4,6 +4,7 @@ A snapshot is taken:
 - every `snapshot_interval_hours` hours (Settings tab, synced down from the Sheet; default 1),
 - a couple of minutes after each return session, once the tools have had time to go back on their hooks,
 - when the dashboard changes the `snapshot_request` setting (any new value means "take one now"),
+- when the dashboard's calibration page changes `reference_request`, it takes a reference photo instead (C2),
 - one minute after any snapshot that saw a problem, so a problem is only reported once two snapshots
   in a row agree (C7): a hand reaching in for a tool never raises an alarm.
 
@@ -65,9 +66,12 @@ class Monitor:
         self.confirm_at: datetime | None = None
         # A request already in the Sheet when we start was answered before the restart (or never will be).
         self.seen_request = setting(conn, "snapshot_request")
+        self.seen_reference = setting(conn, "reference_request")
 
     def due(self, now: datetime) -> str | None:
         """Why a snapshot should be taken now, or None."""
+        if setting(self.conn, "reference_request") != self.seen_reference:
+            return "reference"
         if self.confirm_at and now >= self.confirm_at:
             return "confirm"
         request = setting(self.conn, "snapshot_request")
@@ -80,6 +84,22 @@ class Monitor:
         if not last or now - _ts(last) >= interval(self.conn):
             return "scheduled"
         return None
+
+    def take_reference(self, now: datetime) -> dict:
+        """C2: a "tool present" picture for the calibration screen. Kept on the Pi (spots are compared against it)
+        and sent to Drive so a supervisor can draw the spot boxes on it from the dashboard."""
+        self.seen_reference = setting(self.conn, "reference_request")
+        ref_dir = self.photo_dir / "references"
+        ref_dir.mkdir(exist_ok=True)
+        ref_id = uuid.uuid4().hex
+        path = self.camera.snapshot(str(ref_dir / f"reference-{now:%Y%m%d-%H%M%S}-{ref_id[:6]}.jpg"))
+        with Image.open(path) as img:
+            width, height = img.size
+        row = {"reference_id": ref_id, "ts": _iso(now), "reference_photo": path, "width": width, "height": height}
+        with tx(self.conn):
+            enqueue(self.conn, "photo", {"path": path, "keep": True})
+            enqueue(self.conn, "reference", row)
+        return row
 
     def take(self, now: datetime, reason: str) -> dict:
         """One snapshot: classify every calibrated spot, compare with the records, open or update alerts."""
@@ -202,7 +222,9 @@ def main() -> None:
     while True:
         now = datetime.now(timezone.utc)
         try:
-            if reason := m.due(now):
+            if (reason := m.due(now)) == "reference":
+                log.info("reference photo for calibration: %s", m.take_reference(now)["reference_photo"])
+            elif reason:
                 r = m.take(now, reason)
                 log.info("snapshot (%s): %s; %d alert(s)", reason, r["spots"], len(r["alerts"]))
         except Exception:  # a bad round (DB busy, odd image) must not stop the monitor for the night

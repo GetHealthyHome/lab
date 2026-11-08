@@ -12,6 +12,7 @@ A Google Apps Script web app that lives inside the Lab Toolbox Sheet. The Pi wri
 | Quarantine | Damage reports and photos; release the tool or retire it | D11 |
 | Labels | Worn labels; print a batch (CSV for the label printer) and mark them printed | D12 |
 | Records | Tools, People, Spots, battery platforms, kits and kit contents; PIN reset | D6, D7, D13 |
+| Calibrate | Ask the Pi for a reference photo, draw a box around each spot's tool, link the spot to its tool (supervisors) | C2 |
 | Settings | Loan length, closing time, grace period, PIN on/off, snapshot interval, alert emails | D14 |
 | Kiosk | Last sync, queue size, recent snapshots; ask for a cage snapshot now | D8, C1 |
 
@@ -34,7 +35,7 @@ After pasting new versions of the files, use **Deploy > Manage deployments > Edi
 ## Tabs it uses
 Missing tabs read as empty, so the page works before the Pi has written anything. Tabs the dashboard writes (Reconciliations, AuditLog, Settings) are created with their headers on first use.
 
-`Reconciliations`: date, instructor, spots_confirmed, exceptions, signed_at, details (the per-spot answers as JSON). `Health`: written by the Pi's sync service after every push. `Extensions`: loan extensions (txn_id, due_at, by, ts, reason), written by the kiosk.
+`Reconciliations`: date, instructor, spots_confirmed, exceptions, signed_at, details (the per-spot answers as JSON). `Health`: written by the Pi's sync service after every push. `References`: reference photos the Pi took for calibration (reference_id, ts, reference_photo, width, height). `Extensions`: loan extensions (txn_id, due_at, by, ts, reason), written by the kiosk.
 
 ## Tests
 The `.gs` files run in Node against a fake Sheet, so no Google account is needed:

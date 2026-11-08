@@ -180,3 +180,23 @@ test('end-of-day report collects the day', () => {
   assert.strictEqual(r.reconciliation, null);
   assert.deepStrictEqual(r.quarantined.map((t) => t.asset_id), ['HHA-3']);
 });
+
+test('calibration saves boxes on one reference photo and gives each spot one tool', () => {
+  const link = 'https://drive.google.com/file/d/REFabcdefghij/view';
+  const g = load({ People: PEOPLE, Tools: TOOLS,
+    Spots: [['spot_id', 'label', 'box', 'reference_photo'], ['LOC-S01-B01-H01', 'hook 1', '', ''], ['LOC-S01-B01-H02', 'hook 2', '[1,1,5,5]', 'old']],
+    References: [['reference_id', 'ts', 'reference_photo', 'width', 'height'], ['r1', iso(5), link, 1280, 720]] });
+  assert.throws(() => load({ People: PEOPLE }, 'rivera@lab.org').api('calibration'), /Only supervisors/);
+  assert.strictEqual(g.api('calibration').data.references[0].width, 1280);
+  assert.throws(() => g.api('saveCalibration', { reference_photo: 'C:/x.jpg', spots: [] }), /reference photo/);
+  g.api('saveCalibration', { reference_photo: link, spots: [
+    { spot_id: 'LOC-S01-B01-H01', box: [10.4, 20.6, 100, 80], asset_id: 'HHA-2' },  // the drill moves to hook 1
+    { spot_id: 'LOC-S01-B01-H02', box: null, asset_id: '' }] });
+  const spots = g.toObjects(g.sheets.Spots.rows);
+  assert.deepStrictEqual([spots[0].box, spots[0].reference_photo], ['[10,21,100,80]', link]);
+  assert.strictEqual(spots[1].box, '');
+  const tools = g.toObjects(g.sheets.Tools.rows);
+  assert.deepStrictEqual([...tools.map((t) => t.spot_id)], ['', 'LOC-S01-B01-H01', 'LOC-S01-B01-H03']);
+  g.api('requestReference');
+  assert.ok(g.toObjects(g.sheets.Settings.rows).some((r) => r.key === 'reference_request'));
+});

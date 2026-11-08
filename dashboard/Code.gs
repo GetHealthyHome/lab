@@ -192,6 +192,37 @@ var API = {
     return API.settings.run(me);
   } },
 
+  calibration: { supervisor: true, run: function () {  // C2
+    var newest = function (x, y) { return ms(y.ts) - ms(x.ts); };
+    return { references: read_('References').sort(newest).slice(0, 5), spots: read_('Spots'),
+      tools: read_('Tools').filter(function (t) { return String(t.status).toLowerCase() !== 'retired'; })
+        .map(function (t) { return { asset_id: t.asset_id, name: t.name, spot_id: t.spot_id }; }),
+      request: settingsMap(read_('Settings')).reference_request || '' };
+  } },
+
+  requestReference: { write: true, supervisor: true, run: function (me) {
+    setSetting_('reference_request', new Date().toISOString(), me, 'Reference photo requested for calibration');
+    return { ok: true };
+  } },
+
+  // C2: boxes drawn on one reference photo, each spot linked to its tool. a: {reference_photo, spots: [{spot_id, box, asset_id}]}
+  saveCalibration: { write: true, supervisor: true, run: function (me, a) {
+    if (!driveId(a.reference_photo)) throw new Error('Pick a reference photo first.');
+    var tools = read_('Tools');
+    a.spots.forEach(function (s) {
+      var box = s.box ? JSON.stringify(s.box.map(Math.round)) : '';
+      var err = checkValue({}, 'box', box);
+      if (err) throw new Error(s.spot_id + ': ' + err);
+      update_('Spots', 'spot_id', s.spot_id, box ? { box: box, reference_photo: a.reference_photo } : { box: '' }, me, 'Calibration');
+      if (!s.asset_id) return;
+      tools.forEach(function (t) {  // one tool per spot: the tool that used to live here loses the spot
+        if (t.spot_id === s.spot_id && t.asset_id !== s.asset_id) update_('Tools', 'asset_id', t.asset_id, { spot_id: '' }, me, 'Calibration: spot given to ' + s.asset_id);
+      });
+      update_('Tools', 'asset_id', s.asset_id, { spot_id: s.spot_id }, me, 'Calibration');
+    });
+    return API.calibration.run(me);
+  } },
+
   health: { run: function () {  // D8
     var snaps = read_('Snapshots').sort(function (a, b) { return ms(b.ts) - ms(a.ts); });
     return { health: read_('Health'), snapshots: snaps.slice(0, 10), request: settingsMap(read_('Settings')).snapshot_request || '' };

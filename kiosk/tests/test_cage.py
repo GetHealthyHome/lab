@@ -168,3 +168,29 @@ def test_uncalibrated_spots_are_skipped(conn, mon):
     conn.execute("UPDATE spots SET box = NULL WHERE spot_id = ?", (A,))
     conn.execute("UPDATE spots SET box = 'left side' WHERE spot_id = ?", (B,))
     assert mon.take(T0, "scheduled")["spots"] == {}
+
+
+def test_reference_photo_for_calibration_is_kept_and_mapped_back(conn, mon, tmp_path):
+    from lab_toolbox.google import GoogleSink
+    from test_google import FakeGoogle
+
+    assert mon.due(T0) == "scheduled"
+    conn.execute("INSERT INTO settings VALUES ('reference_request', '2026-11-08T10:00')")  # dashboard: Take reference photo
+    assert mon.due(T0) == "reference"
+    ref = mon.take_reference(T0)
+    assert mon.due(T0) == "scheduled"
+    assert (ref["width"], ref["height"]) == (100, 100)
+
+    g = FakeGoogle({"Spots": [["spot_id", "label", "box", "reference_photo"]], "Tools": [["asset_id"]], "People": [["person_id"]]})
+    sink = GoogleSink(g, conn, "S", "F")
+    assert sync.sync_once(conn, sink) == 2
+    assert (tmp_path / "photos" / "references").exists() and __import__("os").path.exists(ref["reference_photo"])  # not deleted
+    header, row = g.tabs["References"]
+    link = dict(zip(header, row))["reference_photo"]
+    assert link.startswith("https://drive.google.com/")
+
+    # Supervisor draws a box on that photo in the dashboard; the Pi gets its own file path back.
+    g.tabs["Spots"].append([A, "Shelf 03, bay 02, hook 04", "[1, 2, 3, 4]", link])
+    sink.pull()
+    assert tuple(conn.execute("SELECT box, reference_photo FROM spots WHERE spot_id = ?", (A,)).fetchone()) == (
+        "[1, 2, 3, 4]", ref["reference_photo"])

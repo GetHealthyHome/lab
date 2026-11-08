@@ -41,6 +41,12 @@
          background: var(--ink); color: #fff; display: none; max-width: 90vw; }
   #msg.err { background: var(--red); }
   .alert { border-left: 4px solid var(--red); }
+  #stage { position: relative; display: inline-block; touch-action: none; user-select: none; max-width: 100%; }
+  #stage img { display: block; max-width: 100%; }
+  .box { position: absolute; border: 2px solid var(--accent); background: #1f6feb22; pointer-events: none; }
+  .box.sel { border-color: var(--red); background: #c6282822; }
+  .box span { position: absolute; left: 0; top: -20px; background: var(--accent); color: #fff; font-size: 11px; padding: 0 4px; white-space: nowrap; }
+  .box.sel span { background: var(--red); }
   .alert.check_camera { border-left-color: var(--amber); }
   @media print { header, .noprint { display: none !important; } body { background: #fff; } .card { border: 0; } }
 </style>
@@ -57,7 +63,7 @@
 <script>
 var VIEWS = [
   ['home', 'Out now'], ['alerts', 'Alerts'], ['search', 'Search'], ['reconcile', 'Nightly check'], ['report', 'Day report'],
-  ['quarantine', 'Quarantine'], ['labels', 'Labels'], ['records', 'Records'], ['settings', 'Settings'], ['health', 'Kiosk'],
+  ['quarantine', 'Quarantine'], ['labels', 'Labels'], ['records', 'Records'], ['calibrate', 'Calibrate'], ['settings', 'Settings'], ['health', 'Kiosk'],
 ];
 var ME = null;
 
@@ -218,6 +224,88 @@ var RENDER = {
     });
   },
 };
+
+// -- Calibrate (C2): draw a box per spot on a reference photo, link each spot to its tool ------------
+var CAL = null;
+RENDER.calibrate = function () {
+  call('calibration', {}, function (d) {
+    CAL = { d: d, ref: d.references[0] || null, sel: 0, spots: d.spots.map(function (s) {
+      var box = null;
+      try { box = s.box ? JSON.parse(s.box) : null; } catch (e) { box = null; }
+      var tool = d.tools.filter(function (t) { return t.spot_id === s.spot_id; })[0];
+      return { spot_id: s.spot_id, label: s.label, box: box, asset_id: tool ? tool.asset_id : '', ref: s.reference_photo };
+    }) };
+    drawCal();
+  });
+};
+function drawCal() {
+  var d = CAL.d, ref = CAL.ref;
+  view('<h2>Calibrate the cage camera</h2>' +
+    '<p>1. Make sure the cage lights are on and every tool is on its hook. 2. Take a reference photo. 3. Pick a spot on the right, then drag a box around its tool on the photo. 4. Save.</p>' +
+    '<p><button class="b" id="takeRef">Take a new reference photo</button> <span class="muted">' + (d.request ? 'Requested ' + when(d.request) + '. ' : '') +
+    'It appears here within about 10 minutes; reload this page to check.</span></p>' +
+    (d.references.length ? '<p>Reference photo: <select id="refPick">' + d.references.map(function (r, i) {
+      return '<option value="' + i + '"' + (r === ref ? ' selected' : '') + '>' + when(r.ts) + '</option>'; }).join('') + '</select></p>' : '') +
+    '<div class="row"><div>' + (ref && driveId(ref.reference_photo) ? '<div id="stage"><img id="refImg" draggable="false" src="https://drive.google.com/thumbnail?id=' +
+      driveId(ref.reference_photo) + '&sz=w' + esc(ref.width || 1280) + '" alt="Reference photo of the cage"></div>' : '<div class="card">No reference photo yet.</div>') + '</div>' +
+    '<div style="min-width:280px;flex:1"><table><tr><th></th><th>Spot</th><th>Tool</th><th>Box</th></tr>' + CAL.spots.map(function (s, i) {
+      var stale = s.box && ref && s.ref && s.ref !== ref.reference_photo;
+      return '<tr><td><input type="radio" name="spot" ' + (i === CAL.sel ? 'checked' : '') + ' onchange="CAL.sel=' + i + ';drawBoxes()"></td>' +
+        '<td><b>' + esc(s.label) + '</b><br><span class="muted">' + esc(s.spot_id) + '</span></td><td><select onchange="CAL.spots[' + i + '].asset_id=this.value">' +
+        '<option value=""></option>' + d.tools.map(function (t) {
+          return '<option value="' + esc(t.asset_id) + '"' + (t.asset_id === s.asset_id ? ' selected' : '') + '>' + esc(t.name + ' (' + t.asset_id + ')') + '</option>'; }).join('') +
+        '</select></td><td>' + (s.box ? (stale ? '<span class="tag amber">old photo</span> ' : '<span class="tag green">set</span> ') +
+          '<button class="b" onclick="CAL.spots[' + i + '].box=null;drawCal()">Clear</button>' : '<span class="muted">none</span>') + '</td></tr>';
+    }).join('') + '</table><p><button class="b primary" id="saveCal">Save calibration</button></p>' +
+    '<p class="muted">Saving puts every boxed spot on the photo shown. A spot marked "old photo" was drawn on an earlier one: redraw it, or it moves to this photo as is.</p></div></div>');
+  $('takeRef').onclick = function () { call('requestReference', {}, function () { say('Reference photo requested'); }); };
+  if ($('refPick')) $('refPick').onchange = function () { CAL.ref = d.references[+this.value]; drawCal(); };
+  $('saveCal').onclick = function () {
+    if (!CAL.ref) return say('Take a reference photo first.', true);
+    call('saveCalibration', { reference_photo: CAL.ref.reference_photo, spots: CAL.spots.map(function (s) {
+      return { spot_id: s.spot_id, box: s.box, asset_id: s.asset_id }; }) }, function () { say('Calibration saved. The kiosk picks it up within 10 minutes.'); RENDER.calibrate(); });
+  };
+  var img = $('refImg');
+  if (!img) return;
+  img.onload = drawBoxes;
+  var stage = $('stage'), start = null;
+  function pos(e) {  // pointer position in reference-photo pixels
+    var r = img.getBoundingClientRect(), k = (CAL.ref.width || img.naturalWidth) / r.width;
+    return [Math.max(0, Math.min(r.width, e.clientX - r.left)) * k, Math.max(0, Math.min(r.height, e.clientY - r.top)) * k];
+  }
+  stage.onpointerdown = function (e) { if (!CAL.spots.length) return; start = pos(e); stage.setPointerCapture(e.pointerId); };
+  stage.onpointermove = function (e) {
+    if (!start) return;
+    var p = pos(e);
+    CAL.spots[CAL.sel].box = [Math.min(start[0], p[0]), Math.min(start[1], p[1]), Math.abs(p[0] - start[0]), Math.abs(p[1] - start[1])];
+    drawBoxes();
+  };
+  stage.onpointerup = function () {
+    if (!start) return;
+    start = null;
+    var s = CAL.spots[CAL.sel];
+    if (s.box && (s.box[2] < 5 || s.box[3] < 5)) s.box = null;  // a tap, not a box
+    s.ref = CAL.ref.reference_photo;
+    drawCal();
+  };
+  drawBoxes();
+}
+function drawBoxes() {
+  var img = $('refImg'), stage = $('stage');
+  if (!img || !img.clientWidth) return;
+  [].slice.call(stage.querySelectorAll('.box')).forEach(function (b) { b.remove(); });
+  var k = img.clientWidth / (CAL.ref.width || img.naturalWidth);
+  CAL.spots.forEach(function (s, i) {
+    if (!s.box) return;
+    var b = document.createElement('div');
+    b.className = 'box' + (i === CAL.sel ? ' sel' : '');
+    b.style.cssText = 'left:' + s.box[0] * k + 'px;top:' + s.box[1] * k + 'px;width:' + s.box[2] * k + 'px;height:' + s.box[3] * k + 'px';
+    var t = document.createElement('span');
+    t.textContent = s.spot_id;
+    b.appendChild(t);
+    stage.appendChild(b);
+  });
+}
 
 function stat(n, l, cls) { return '<div class="stat"><div class="n" style="color:' + (cls === 'red' ? 'var(--red)' : 'inherit') + '">' + n + '</div><div class="l">' + esc(l) + '</div></div>'; }
 function label(v) { return String(v || '').replace(/_/g, ' '); }

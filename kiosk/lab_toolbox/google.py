@@ -18,7 +18,8 @@ DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 # Outbox kind -> Sheet tab. "photo" goes to Drive instead.
-TABS = {"transaction": "Transactions", "snapshot": "Snapshots", "alert": "Alerts", "audit": "AuditLog"}
+TABS = {"transaction": "Transactions", "snapshot": "Snapshots", "alert": "Alerts", "audit": "AuditLog",
+        "reference": "References"}
 HEALTH_TAB = "Health"
 # Payload fields that hold a local photo path; swapped for the Drive link before the row is written.
 PHOTO_FIELDS = ("gate_photo", "photo", "snapshot_photo", "reference_photo")
@@ -138,6 +139,8 @@ class GoogleSink:
         settings, alerts = self._records("Settings", "key"), self._records("Alerts", "alert_id")
         # D7 corrections staff made on the dashboard, like "record it as returned"
         fixes = [t for t in self._records("Transactions", "txn_id", optional=True) if t.get("kiosk_id") == "dashboard"]
+        # The calibration page stores the reference photo's Drive link; the Pi compares against its own copy.
+        local = {r["link"]: r["path"] for r in self.conn.execute("SELECT link, path FROM drive_photos")}
         with tx(self.conn):  # all three or none, so a half-read Sheet never leaves tools pointing at missing spots
             for s in spots:
                 self.conn.execute(
@@ -145,7 +148,8 @@ class GoogleSink:
                     " ON CONFLICT(spot_id) DO UPDATE SET label=excluded.label, box=excluded.box,"
                     " reference_photo=excluded.reference_photo",
                     {"spot_id": s["spot_id"], "label": s.get("label") or s["spot_id"],
-                     "box": s.get("box") or None, "reference_photo": s.get("reference_photo") or None},
+                     "box": s.get("box") or None,
+                     "reference_photo": local.get(s.get("reference_photo"), s.get("reference_photo")) or None},
                 )
             for t in tools:
                 # Sheet status may say out/missing; locally those come from transactions and alerts, not this column.
