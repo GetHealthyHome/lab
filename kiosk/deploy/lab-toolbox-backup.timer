@@ -1,0 +1,10 @@
+# Installed and enabled by install.sh
+[Unit]
+Description=Hourly Lab Toolbox database backup
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

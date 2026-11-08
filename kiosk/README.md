@@ -95,18 +95,27 @@ Tools.status in the Sheet is only read for `quarantined` and `retired`; "out" al
 ## On the Pi
 The gate camera has one owner: the web service. Reading codes and taking the Done photo both happen there, because only one program can hold the Pi camera at a time (like one person holding the TV remote). Scanning runs beside the API in the same process, decoding on a worker thread so the screen stays quick.
 
+Install on a Pi 3B+ with a fresh **Raspberry Pi OS Lite (64-bit)** card (16 GB or more, high-endurance):
 ```bash
-sudo apt install python3-picamera2 fswebcam      # picamera2 comes from apt on Pi OS, not pip
-sudo useradd -r -G video,gpio kiosk
-sudo mkdir -p /data && sudo chown kiosk /data
+sudo apt install -y git
 sudo git clone https://github.com/GetHealthyHome/lab /opt/lab-toolbox
-cd /opt/lab-toolbox/kiosk
-sudo python3 -m venv --system-site-packages .venv   # so the venv sees apt's picamera2
-sudo .venv/bin/pip install -e '.[pi]'
-sudo cp deploy/lab-toolbox.env.example /etc/lab-toolbox.env   # then fill it in, chmod 600, chown kiosk
-sudo cp deploy/*.service /etc/systemd/system/
-sudo systemctl enable --now lab-toolbox-kiosk lab-toolbox-sync lab-toolbox-cage
+sudo /opt/lab-toolbox/kiosk/deploy/install.sh     # reboots once to make the data partition
+sudo /opt/lab-toolbox/kiosk/deploy/install.sh     # run again after the reboot; reboots into the kiosk screen
 ```
+What `deploy/install.sh` sets up:
+- **Data partition.** The first run shrinks the system partition to 8 GB and turns the rest of the card into `/data` (label `LTDATA`). It does this from the initramfs on the next boot, before the system is mounted, because a mounted disk can't be shrunk. `/data` holds everything that changes: `kiosk.db`, `photos/`, `lab-toolbox.env` (the settings file every service reads), `google-key.json`, `logo.png`, the system logs (`journal/`) and hourly database copies (`backups/`, 24 rotating files).
+- **Services**, each restarting on its own if it stops: `lab-toolbox-kiosk` (API, gate camera, buzzer), `lab-toolbox-sync`, `lab-toolbox-cage`, `lab-toolbox-screen` and the `lab-toolbox-backup` timer. Each one waits for `/data`.
+- **The screen.** `lab-toolbox-screen` runs Chromium full screen inside `cage`, a display server that shows one window and nothing else: no address bar, no desktop, no switching to a text console. A Chromium policy (`deploy/chromium-policy.json`) blocks every address except the kiosk's own page and turns off developer tools, downloads and printing, so even a plugged-in keyboard can't wander off.
+- **Lighter boot.** Bluetooth, modem manager and the apt and man-db timers are off; swap is in compressed RAM, not on the card; the hardware watchdog reboots a frozen Pi within 15 s.
+
+**Lock it read-only** once it's set up and tested. Like laminating a sign: the system can't be scribbled on, so a power cut can't corrupt it, while `/data` stays writable. Changes to anything outside `/data` vanish at the next reboot.
+```bash
+sudo raspi-config nonint do_overlayfs 0 && sudo reboot    # lock
+sudo raspi-config nonint do_overlayfs 1 && sudo reboot    # unlock, to update:
+cd /opt/lab-toolbox && sudo git pull && sudo kiosk/deploy/install.sh   # then lock again
+```
+Logs: `journalctl -u lab-toolbox-kiosk` (or `-sync`, `-cage`, `-screen`).
+
 Buzzer: a passive piezo (or a small amp and speaker) between `BUZZER_PIN` (BCM numbering, default 18) and ground. The motion and timing values at the top of `reader.py` are starting points to tune on the real camera.
 
 ## Cage monitor
@@ -120,4 +129,4 @@ Like a guard who walks past the shelves on a timer. It takes a snapshot:
 Spots need a `box` (`[x, y, w, h]` in reference-photo pixels) and a `reference_photo`; spots without them are skipped until they are calibrated. Calibration (C2) happens on the dashboard's **Calibrate** page: it asks the Pi for a reference photo (the `reference_request` setting), the Pi takes one, keeps it in `PHOTO_DIR/references/` and sends a copy to Drive and the `References` tab, and the supervisor draws each spot's box on it. The Sheet stores the photo's Drive link; the Pi swaps it back for its own copy on the next pull. Retake the reference photo whenever the lighting or the camera changes. If the webcam fails, every spot reads "unclear" and turns into Check camera alerts. Run it on the Pi with `systemctl enable --now lab-toolbox-cage` (unit in `deploy/`), or on a bench with `KIOSK_DB=kiosk.db CAGE_CAMERA=/dev/video0 python -m lab_toolbox.cage`.
 
 ## Not built yet
-A service that starts Chromium in kiosk mode, and deleting photos after the retention period.
+Deleting photos after the retention period, and the nightly database copy to Drive (the hourly local copies are in `/data/backups`).

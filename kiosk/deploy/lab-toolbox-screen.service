@@ -1,0 +1,35 @@
+# Full-screen kiosk browser on the 7" touchscreen. Installed and enabled by install.sh
+# cage is a one-window display server: Chromium fills the screen, there is no desktop to escape to,
+# and switching to a text console with Ctrl+Alt+F-keys is off.
+[Unit]
+Description=Lab Toolbox screen (Chromium kiosk)
+After=systemd-user-sessions.service lab-toolbox-kiosk.service
+Wants=lab-toolbox-kiosk.service
+Conflicts=getty@tty1.service
+
+[Service]
+User=kiosk
+PAMName=lab-toolbox-screen
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=WLR_LIBINPUT_NO_DEVICES=1
+# Wait (up to 60 s) for the web service, so the screen never opens on an error page
+ExecStartPre=-/usr/bin/timeout 60 /bin/sh -c 'until curl -sf http://127.0.0.1:8000/api/health >/dev/null; do sleep 1; done'
+ExecStart=/usr/bin/cage -- /usr/local/bin/lab-toolbox-browser \
+  --kiosk --incognito --ozone-platform=wayland \
+  --noerrdialogs --disable-infobars --no-first-run --disable-session-crashed-bubble \
+  --disable-pinch --overscroll-history-navigation=0 --disable-features=Translate,TouchpadOverscrollHistoryNavigation \
+  --password-store=basic --check-for-update-interval=31536000 \
+  http://127.0.0.1:8000/
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

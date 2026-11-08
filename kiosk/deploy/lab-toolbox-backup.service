@@ -1,0 +1,11 @@
+# Hourly copy of the database (24 rotating files in /data/backups). Started by lab-toolbox-backup.timer
+[Unit]
+Description=Lab Toolbox database backup
+RequiresMountsFor=/data
+
+[Service]
+Type=oneshot
+User=kiosk
+EnvironmentFile=/data/lab-toolbox.env
+# sqlite's .backup is safe while the kiosk is writing
+ExecStart=/bin/sh -c 'sqlite3 "$KIOSK_DB" ".backup /data/backups/kiosk-$(date +%%H).db"'

@@ -1,0 +1,32 @@
+#!/bin/sh
+# initramfs local-premount script: carves the data partition off the SD card once.
+# Runs before the root filesystem is mounted, and only while the kernel command line
+# has labtoolbox_split=<root size in GiB> (install.sh adds it, then removes it).
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+. /scripts/functions
+
+size=""
+for arg in $(cat /proc/cmdline); do
+	case "$arg" in labtoolbox_split=*) size="${arg#labtoolbox_split=}" ;; esac
+done
+[ -n "$size" ] || exit 0
+
+wait_for_udev 10
+dev=$(resolve_device "$ROOT")
+case "$dev" in /dev/mmcblk*p2) ;; *) log_warning_msg "Lab Toolbox: root is $dev, not SD partition 2; skipping"; exit 0 ;; esac
+disk="${dev%p2}"
+blkid -L LTDATA >/dev/null 2>&1 && exit 0   # already done
+
+log_begin_msg "Lab Toolbox: making the data partition (about a minute)"
+e2fsck -fy "$dev"
+# e2fsck exit 0 or 1 means clean or fixed; anything else, leave the card alone
+[ $? -le 1 ] || { log_failure_msg "e2fsck failed; data partition not made"; exit 0; }
+resize2fs "$dev" "${size}G" || { log_failure_msg "resize2fs failed; data partition not made"; exit 0; }
+echo ",${size}GiB" | sfdisk -N 2 "$disk" || { log_failure_msg "sfdisk resize failed"; exit 0; }
+echo ",,L" | sfdisk --append "$disk" || { log_failure_msg "sfdisk append failed"; exit 0; }
+udevadm settle
+i=0; while [ ! -b "${disk}p3" ] && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
+mke2fs -F -t ext4 -L LTDATA "${disk}p3"
+log_end_msg

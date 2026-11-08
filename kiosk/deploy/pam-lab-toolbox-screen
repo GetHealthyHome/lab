@@ -1,0 +1,5 @@
+# PAM for lab-toolbox-screen.service: gives the kiosk user a login session on tty1 (needed to open the display)
+auth     required pam_unix.so nullok
+account  required pam_unix.so
+session  required pam_unix.so
+session  required pam_systemd.so

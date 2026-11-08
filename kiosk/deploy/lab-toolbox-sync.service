@@ -1,13 +1,15 @@
-# Google sync. Copy to /etc/systemd/system/, then: systemctl enable --now lab-toolbox-sync
+# Google sync. Installed and enabled by install.sh
 [Unit]
 Description=Lab Toolbox Google sync
 After=network-online.target
+# Database, photos and settings live on the data partition
+RequiresMountsFor=/data
 Wants=network-online.target
 
 [Service]
 User=kiosk
 WorkingDirectory=/opt/lab-toolbox/kiosk
-EnvironmentFile=/etc/lab-toolbox.env
+EnvironmentFile=/data/lab-toolbox.env
 ExecStart=/opt/lab-toolbox/kiosk/.venv/bin/python -m lab_toolbox.sync_service
 Restart=always
 RestartSec=10
