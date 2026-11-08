@@ -108,6 +108,8 @@ MIGRATIONS = [
         SELECT asset_id, action, person_id, ts, MAX(rowid) FROM transactions GROUP BY asset_id
     ) last ON last.asset_id = t.asset_id;
     """,
+    # Local photo path -> its Drive copy, so Sheet rows get the link and a retried upload is not duplicated.
+    "CREATE TABLE drive_photos (path TEXT PRIMARY KEY, file_id TEXT NOT NULL, link TEXT NOT NULL)",
 ]
 
 
