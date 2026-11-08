@@ -18,7 +18,8 @@ Open http://localhost:8000 in a window sized 800x480 (the official 7" screen). W
 One lean page (`static/index.html`, no libraries) that only talks to the API below and asks it for the state once a second.
 Every event gets a color, words and (from the Pi's buzzer) a sound: green outline for a good scan, a red flash with the
 reason for a refusal, an amber border with the needed and scanned battery side by side, a red lock screen with a countdown.
-Buttons are at least 80 px (15 mm on the 7" screen); a normal checkout needs no typing. The on-screen keyboard only appears
+Dark by default; a supervisor can switch it to light with `screen_theme` on the dashboard's Settings page (the kiosk
+picks it up within 10 minutes). Buttons are at least 80 px (15 mm on the 7" screen); a normal checkout needs no typing. The on-screen keyboard only appears
 for instructor jobs and for finding a tool to report that isn't in your list.
 
 Screens: start (Check out / Return, Report a problem, Instructor) → PIN pad → scanning list with a 45 s countdown bar and a big

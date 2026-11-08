@@ -14,6 +14,7 @@ var DEFAULT_SETTINGS = [
   ['alert_email', '', 'Instructor on duty: gets an email when a missing-tool alert opens. Commas for several (D9)'],
   ['digest_email', '', 'Who gets the weekday morning digest. Commas for several (D10)'],
   ['digest_hour', '7', 'Hour of the morning digest, Monday to Friday (D10)'],
+  ['screen_theme', 'dark', 'Kiosk screen look: dark (less glare) or light (bright rooms)', ['dark', 'light']],
 ];
 
 var OPEN_ALERT = ['open', 'acknowledged'];

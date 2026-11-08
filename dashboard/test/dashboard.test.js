@@ -162,8 +162,11 @@ test('settings validate and the snapshot request is a setting the Pi watches', (
   assert.throws(() => g.api('saveSettings', { values: { lab_close: '9pm' } }), /21:00/);
   g.api('saveSettings', { values: { loan_hours: '3', grace_minutes: '15' } });  // 15 is the default: not written
   assert.deepStrictEqual(g.sheets.Settings.rows, [['key', 'value'], ['loan_hours', '3']]);
+  assert.throws(() => g.api('saveSettings', { values: { screen_theme: 'blue' } }), /dark or light/);
+  g.api('saveSettings', { values: { screen_theme: 'light' } });
+  assert.deepStrictEqual(g.sheets.Settings.rows[2], ['screen_theme', 'light']);
   g.api('requestSnapshot');
-  assert.strictEqual(g.sheets.Settings.rows[2][0], 'snapshot_request');
+  assert.strictEqual(g.sheets.Settings.rows[3][0], 'snapshot_request');
 });
 
 test('kit items can be removed; other tabs cannot delete rows', () => {

@@ -8,7 +8,11 @@
 <title>Lab Toolbox</title>
 <style>
 :root { --bg:#0f172a; --panel:#1e293b; --line:#334155; --text:#f8fafc; --muted:#a5b4c8; --green:#15803d; --green-hi:#22c55e;
-        --red:#dc2626; --amber:#f59e0b; --blue:#2563eb; --tap:80px; /* 15 mm on the official 7" screen (about 5.2 px per mm) */ }
+        --red:#dc2626; --amber:#f59e0b; --blue:#2563eb; --tap:80px; /* 15 mm on the official 7" screen (about 5.2 px per mm) */
+        --ok-bg:#14532d; --bad-bg:#7f1d1d; --warn-bg:#78350f; --card-bg:#2a2312; --info-bg:#172554; --field:#020617; --overdue:#fca5a5; }
+/* Light look, picked by screen_theme on the dashboard's Settings page */
+:root[data-theme="light"] { --bg:#f1f5f9; --panel:#ffffff; --line:#cbd5e1; --text:#0f172a; --muted:#475569;
+        --ok-bg:#dcfce7; --bad-bg:#fee2e2; --warn-bg:#fef3c7; --card-bg:#fffbeb; --info-bg:#dbeafe; --field:#ffffff; --overdue:#b91c1c; }
 * { box-sizing:border-box; margin:0; padding:0; }
 [hidden] { display:none !important; }
 html, body { height:100%; background:var(--bg); color:var(--text); font:24px/1.25 system-ui, "DejaVu Sans", sans-serif;
@@ -27,7 +31,7 @@ button { font:inherit; font-weight:700; color:var(--text); background:var(--pane
          min-height:var(--tap); min-width:var(--tap); padding:6px 14px; }
 button:active { filter:brightness(1.35); transform:scale(.97); }
 button.green { background:var(--green); border-color:var(--green-hi); } button.red { background:var(--red); border-color:#f87171; }
-button.blue { background:var(--blue); border-color:#60a5fa; } button.amber { background:var(--amber); border-color:#fcd34d; color:#111; }
+button.blue { background:var(--blue); border-color:#60a5fa; } button.green, button.red, button.blue { color:#fff; } button.amber { background:var(--amber); border-color:#fcd34d; color:#111; }
 button.on { outline:5px solid var(--text); outline-offset:3px; }
 button.ghost { background:transparent; }
 button.sm { min-height:64px; font-size:22px; }
@@ -35,7 +39,7 @@ h1 { font-size:40px; } h2 { font-size:28px; } .muted { color:var(--muted); } .sm
 .row { display:flex; gap:12px; } .col { display:flex; flex-direction:column; gap:12px; } .grow { flex:1; min-width:0; min-height:0; }
 .scroll { overflow-y:auto; overscroll-behavior:contain; }
 .msg { flex:none; min-height:58px; display:flex; align-items:center; gap:12px; padding:8px 14px; border-radius:12px; font-size:26px; font-weight:700; background:var(--panel); }
-.msg.ok { background:#14532d; } .msg.bad { background:#7f1d1d; } .msg.warn { background:#78350f; }
+.msg.ok { background:var(--ok-bg); } .msg.bad { background:var(--bad-bg); } .msg.warn { background:var(--warn-bg); }
 .msg i { font-style:normal; font-size:30px; width:34px; text-align:center; }
 /* start screen */
 .idle { flex:1; display:flex; gap:24px; padding:22px; }
@@ -48,8 +52,8 @@ h1 { font-size:40px; } h2 { font-size:28px; } .muted { color:var(--muted); } .sm
 .items li:first-child { animation:slide .35s ease-out; }
 @keyframes slide { from { transform:translateX(-40px); opacity:0; } }
 .items .n { font-size:26px; font-weight:700; } .items .d { font-size:19px; color:var(--muted); }
-.card { border:3px solid var(--amber); border-radius:12px; padding:10px 14px; background:#2a2312; }
-.card.blue { border-color:#60a5fa; background:#172554; }
+.card { border:3px solid var(--amber); border-radius:12px; padding:10px 14px; background:var(--card-bg); }
+.card.blue { border-color:#60a5fa; background:var(--info-bg); }
 .chips { display:flex; flex-wrap:wrap; gap:10px; }
 .bar { flex:none; height:34px; border-radius:17px; background:var(--panel); position:relative; overflow:hidden; }
 .bar div { position:absolute; inset:0 auto 0 0; background:var(--green-hi); transition:width 1s linear; }
@@ -63,20 +67,20 @@ h1 { font-size:40px; } h2 { font-size:28px; } .muted { color:var(--muted); } .sm
 .dots { display:flex; gap:18px; } .dots b { width:34px; height:34px; border-radius:50%; border:4px solid var(--text); }
 .dots b.f { background:var(--text); }
 /* summary and lock */
-.banner { background:var(--green); border-radius:14px; padding:10px 18px; display:flex; align-items:center; gap:16px; }
+.banner { background:var(--green); color:#fff; border-radius:14px; padding:10px 18px; display:flex; align-items:center; gap:16px; }
 .thumb { width:64px; height:64px; object-fit:cover; border-radius:8px; flex:none; background:#fff; }
 .banner .thumb { width:120px; height:120px; }
 .banner .what { font-size:22px; } .banner .where { font-size:34px; font-weight:800; letter-spacing:.5px; }
-.lock { flex:1; background:#7f1d1d; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:20px; }
+.lock { flex:1; background:#7f1d1d; color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:20px; }
 .lock .big { font-size:72px; font-weight:800; font-variant-numeric:tabular-nums; }
 /* on-screen keyboard (instructor and report screens only; normal checkouts never type) */
 .kb { display:grid; grid-template-columns:repeat(10, 1fr); gap:6px; flex:none; }
 .kb button { min-height:54px; min-width:0; padding:0; font-size:26px; border-radius:10px; }
 .kb .w2 { grid-column:span 2; }
-.field { flex:1; min-height:56px; display:flex; align-items:center; padding:0 16px; border:3px solid var(--line); border-radius:12px; background:#020617; font-size:28px; }
+.field { flex:1; min-height:56px; display:flex; align-items:center; padding:0 16px; border:3px solid var(--line); border-radius:12px; background:var(--field); font-size:28px; }
 .field:empty::before { content:attr(data-ph); color:var(--muted); }
 .list-btn { width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:12px; }
-.overdue { color:#fca5a5; }
+.overdue { color:var(--overdue); }
 .offline { position:fixed; bottom:6px; right:10px; font-size:18px; color:var(--muted); }
 </style>
 </head>
@@ -118,6 +122,7 @@ async function poll() {
   try { st = await call("GET", "/api/session"); $("offline").hidden = true; }
   catch { $("offline").hidden = false; return tick(); }
   const ev = st.last_event;
+  document.documentElement.dataset.theme = st.theme;
   if (lastSeq === null) lastSeq = ev ? ev.seq : 0;  // don't replay an old scan after a reload
   else if (ev && ev.seq !== lastSeq) { lastSeq = ev.seq; feedback(ev); }
   const saved = st.auto_saved;  // the 45 s timer saved a walked-away session: still show its summary

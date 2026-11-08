@@ -15,6 +15,9 @@ def test_checkout_over_http(conn, clock):
         assert st["seconds_left"] == 45 and len(st["session"]["items"]) == 1
         assert len(c.post("/api/session/finish").json()["items"]) == 1
         assert c.get("/api/health").json()["sync_pending"] == 1
+        assert c.get("/api/session").json()["theme"] == "dark"
+        conn.execute("INSERT INTO settings VALUES ('screen_theme', 'light')")  # as pulled from the dashboard
+        assert c.get("/api/session").json()["theme"] == "light"
 
 
 def test_screen_gets_battery_and_kit_piece_names(conn, clock):

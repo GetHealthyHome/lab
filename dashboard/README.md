@@ -13,7 +13,7 @@ A Google Apps Script web app that lives inside the Lab Toolbox Sheet. The Pi wri
 | Labels | Worn labels; print a batch (CSV for the label printer) and mark them printed | D12 |
 | Records | Tools, People, Spots, battery platforms, kits and kit contents; PIN reset | D6, D7, D13 |
 | Calibrate | Ask the Pi for a reference photo, draw a box around each spot's tool, link the spot to its tool (supervisors) | C2 |
-| Settings | Loan length, closing time, grace period, PIN on/off, snapshot interval, alert emails | D14 |
+| Settings | Loan length, closing time, grace period, PIN on/off, snapshot interval, alert emails, kiosk screen light or dark | D14 |
 | Emails | A missing-tool email to `alert_email` within 5 minutes of the alert reaching the Sheet; a weekday digest to `digest_email` at `digest_hour` (default 7 AM): tools out, open alerts, overdue with borrower, missing tools, new damage and quarantine with photo links, labels to reprint, last night's sign-off | D9, D10 |
 | Kiosk | Last sync, queue size, recent snapshots; ask for a cage snapshot now | D8, C1 |
 

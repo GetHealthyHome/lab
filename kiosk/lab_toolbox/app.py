@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db, sync
-from .db import now_iso
+from .db import now_iso, setting
 from .hardware import Buzzer
 from .reader import Watcher
 from . import loans
@@ -145,6 +145,7 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
             **kiosk.state(),
             "seconds_left": kiosk.seconds_left(),
             "idle_timeout": kiosk.idle_timeout,
+            "theme": "light" if setting(kiosk.conn, "screen_theme", "dark") == "light" else "dark",  # dashboard Settings
             # set when the idle timer saved a session, so the screen can still show the summary
             "auto_saved": request.app.state.last_saved,
             # latest camera scan result, so the screen can flash green or red; `seq` changes on each one
