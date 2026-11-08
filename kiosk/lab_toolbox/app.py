@@ -243,6 +243,23 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
     async def clear(body: ClearBody, request: Request):
         return k(request).clear_quarantine(body.asset_id, body.note)
 
+    @app.post("/api/instructor/tool_photo")
+    async def tool_photo(body: AssetBody, request: Request):
+        return k(request).take_tool_photo(body.asset_id)
+
+    @app.get("/api/photos")
+    async def photos(request: Request):
+        """Tools with a photo on this Pi, {asset_id: version}; the screen only asks for these, so no 404s."""
+        rows = k(request).conn.execute("SELECT asset_id, photo FROM tools WHERE photo IS NOT NULL").fetchall()
+        return {r["asset_id"]: int(os.path.getmtime(r["photo"])) for r in rows if os.path.isfile(r["photo"])}
+
+    @app.get("/api/tools/{asset_id}/photo")
+    async def tool_photo_file(asset_id: str, request: Request):
+        row = k(request).conn.execute("SELECT photo FROM tools WHERE asset_id = ?", (asset_id,)).fetchone()
+        if not row or not row["photo"] or not os.path.isfile(row["photo"]):
+            return JSONResponse({"reason": "No photo"}, status_code=404)
+        return FileResponse(row["photo"])
+
     @app.post("/api/instructor/logout")
     async def logout(request: Request):
         k(request).logout_instructor()

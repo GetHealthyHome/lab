@@ -612,6 +612,20 @@ class Kiosk:
             self._audit(inst, "Tools", tool["asset_id"], "status", "quarantined", "available", note, in_tx=True)
         return {"asset_id": tool["asset_id"], "status": "available"}
 
+    def take_tool_photo(self, asset_id: str) -> dict:
+        """Instructor holds a newly labeled tool up to the gate camera; the screen shows this photo from then on."""
+        inst = self._staff()
+        tool = self._tool(asset_id)
+        path = self._take_photo()
+        if not path:
+            raise Rejected("The camera didn't take a photo. Try again.")
+        with tx(self.conn):
+            self.conn.execute("UPDATE tools SET photo = ? WHERE asset_id = ?", (path, tool["asset_id"]))
+            enqueue(self.conn, "photo", {"path": path, "keep": True})  # kept on the Pi: the screen needs it offline
+            enqueue(self.conn, "tool", {"asset_id": tool["asset_id"], "photo": path})
+            self._audit(inst, "Tools", tool["asset_id"], "photo", tool["photo"], path, "Tool photo taken at the kiosk", in_tx=True)
+        return {"asset_id": tool["asset_id"], "name": tool["name"]}
+
     def find_people(self, q: str = "") -> list[dict]:
         self._staff()
         like = f"%{q.strip()}%"

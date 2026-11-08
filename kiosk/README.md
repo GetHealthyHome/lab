@@ -26,6 +26,11 @@ Done → summary (due time, or a green RETURN TO banner per tool). Report a prob
 session (damaged, not in its spot, worn label). Instructor mode: start a session for a student, type an asset number, link a
 new badge, move due times, release a locked tool.
 
+**Tool photos:** once a tool is labeled, an instructor taps **Take tool photos**, picks the tool and holds it up to the
+gate camera. The photo stays on the Pi (the screen must work offline) and a copy goes to Drive, with its link in a `photo`
+column on the Tools tab. It then shows as a thumbnail in the scanning list and beside the RETURN TO banner. Tools without
+a photo just show their name.
+
 **Logo:** put the lab's logo at `lab_toolbox/static/logo.png` (square, transparent background, about 400 px) and restart the
 service. It shows large on the start screen and small in the corner of every other screen. Until then a dashed "LAB LOGO"
 placeholder (`static/logo.svg`) holds the spot.
@@ -75,7 +80,7 @@ Like a mail carrier with a key to one mailbox: the Pi gets its own Google robot 
 1. In Google Cloud console: create a project, enable the **Google Sheets API** and **Google Drive API**, create a **service account**, and download its JSON key. Keep the key only on the Pi (for example `/data/google-key.json`, readable by the kiosk user only).
 2. Create the Sheet with tabs `Transactions`, `Spots`, `Tools`, `People`, `Settings`, `Snapshots`, `Alerts`, `AuditLog`. Every one of these must exist, even empty, or the pull fails. `BatteryGroups`, `Kits` and `KitItems` are read when they exist; `References`, `Health`, `DamageReports`, `ReprintQueue` and `Extensions` are created by the first row the kiosk sends. Share it with the service account's email as **Editor**.
 3. Put the photo folder in a **Shared Drive** and add the service account as a **Content manager**. A service account has no storage of its own, so uploads to a normal "My Drive" folder are refused.
-4. Header rows: `Spots`: `spot_id, label, box, reference_photo`. `Tools`: `asset_id, qr_code, name, category, spot_id, status, notes`. `People`: `person_id, id_code, name, role, pin_hash, active, email` (staff need `email` for the dashboard). Tools can also have `serial, brand, model, needs_battery, battery_group_id, is_battery`. `BatteryGroups`: `group_id, name`. `Kits`: `kit_id, case_code, name, spot_id, check_mode, status`. `KitItems`: `kit_id, asset_id`. `Settings`: `key, value`. `Alerts`: at least `alert_id, status, resolution_note`. `Transactions`, `Snapshots` and the rest of `Alerts` can start empty: the kiosk writes its header on the first push, and any column order works after that.
+4. Header rows: `Spots`: `spot_id, label, box, reference_photo`. `Tools`: `asset_id, qr_code, name, category, spot_id, status, notes` (the kiosk adds `photo`). `People`: `person_id, id_code, name, role, pin_hash, active, email` (staff need `email` for the dashboard). Tools can also have `serial, brand, model, needs_battery, battery_group_id, is_battery`. `BatteryGroups`: `group_id, name`. `Kits`: `kit_id, case_code, name, spot_id, check_mode, status`. `KitItems`: `kit_id, asset_id`. `Settings`: `key, value`. `Alerts`: at least `alert_id, status, resolution_note`. `Transactions`, `Snapshots` and the rest of `Alerts` can start empty: the kiosk writes its header on the first push, and any column order works after that.
 5. Run it:
 ```bash
 pip install -e '.[pi]'

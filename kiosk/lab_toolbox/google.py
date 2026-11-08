@@ -169,6 +169,8 @@ class GoogleSink:
                 self.conn.execute(
                     f"INSERT INTO tools (asset_id, {', '.join(cols)}) VALUES (:asset_id, {', '.join(':' + c for c in cols)})"
                     f" ON CONFLICT(asset_id) DO UPDATE SET {', '.join(f'{c}=excluded.{c}' for c in cols)}", row)
+                if t.get("photo"):  # Drive link back to the Pi's own copy; a blank cell never wipes a photo taken here
+                    self.conn.execute("UPDATE tools SET photo = ? WHERE asset_id = ?", (local.get(t["photo"], t["photo"]), t["asset_id"]))
             for p in people:
                 self.conn.execute(
                     "INSERT INTO people (person_id, id_code, name, role, pin_hash, active, email)"

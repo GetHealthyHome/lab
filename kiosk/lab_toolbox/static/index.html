@@ -63,7 +63,9 @@ h1 { font-size:40px; } h2 { font-size:28px; } .muted { color:var(--muted); } .sm
 .dots { display:flex; gap:18px; } .dots b { width:34px; height:34px; border-radius:50%; border:4px solid var(--text); }
 .dots b.f { background:var(--text); }
 /* summary and lock */
-.banner { background:var(--green); border-radius:14px; padding:10px 18px; }
+.banner { background:var(--green); border-radius:14px; padding:10px 18px; display:flex; align-items:center; gap:16px; }
+.thumb { width:64px; height:64px; object-fit:cover; border-radius:8px; flex:none; background:#fff; }
+.banner .thumb { width:120px; height:120px; }
 .banner .what { font-size:22px; } .banner .where { font-size:34px; font-weight:800; letter-spacing:.5px; }
 .lock { flex:1; background:#7f1d1d; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:20px; }
 .lock .big { font-size:72px; font-weight:800; font-variant-numeric:tabular-nums; }
@@ -93,6 +95,9 @@ const KEYS = "1234567890QWERTYUIOPASDFGHJKL-ZXCVBNM".split("");
 const TAGS = ["Cracked", "Broken part", "Won't power on", "Frayed cord", "Missing piece", "Dull or worn", "Leaking", "Bent"];
 const NOTES = ["Inspected, no damage", "Repaired", "Damage is cosmetic only"];
 
+let photos = {};  // asset_id -> version, for tools with a photo on this Pi
+const thumb = (id, style = "") => photos[id] ? `<img class="thumb" style="${style}" src="/api/tools/${encodeURIComponent(id)}/photo?v=${photos[id]}" alt="">` : "";
+const loadPhotos = () => call("GET", "/api/photos").then(p => { photos = p; render(); }).catch(() => {});
 let st = null, lastSeq = null, lastHtml = "", flashTimer, lastTap = Date.now(), logo = "/static/logo.svg";
 const ui = { pin: "", msg: null, summary: null, locked: null, report: null, inst: null, seenSaved: undefined, cancelArm: 0 };
 // The lab's own logo wins if someone dropped in logo.png; otherwise the placeholder SVG.
@@ -212,7 +217,7 @@ function sessionView(s) {
     <div class="col grow">
       ${msgBar(out ? "Hold each tool's label up to the camera" : "Hold each tool you're returning up to the camera")}
       <div class="col grow scroll">${cards.join("")}
-        <ul class="items">${items.length ? items.map(i => `<li><div class="grow"><div class="n">${esc(i.name)}</div>
+        <ul class="items">${items.length ? items.map(i => `<li>${thumb(i.asset_id)}<div class="grow"><div class="n">${esc(i.name)}</div>
           <div class="d">${esc(i.asset_id)}${i.kit_id ? " · kit" : ""}${i.battery ? " · battery " + esc(i.battery) : ""}${i.needs_battery && !i.battery ? " · <span style='color:var(--amber)'>needs a battery</span>" : ""}</div></div>
           <button class="ghost" aria-label="Remove ${esc(i.name)}" data-act="remove" data-arg="${esc(i.asset_id)}">✕</button></li>`).join("")
           : `<li class="muted" style="animation:none">No tools yet</li>`}</ul></div>
@@ -234,7 +239,7 @@ function summaryView() {
        ${r.due_at ? `<h2>Due back by ${esc(time(r.due_at))}</h2>` : ""}
        <div class="grow scroll col">${r.items.map(i => `<div class="n" style="font-size:26px">• ${esc(i.name)}</div>`).join("")}</div>`
     : `<div class="msg ok"><i>✓</i>Returned. Put each tool back here:</div>
-       <div class="grow scroll col">${short}${r.items.map(i => `<div class="banner"><div class="what">${esc(i.name)}</div><div class="where">RETURN TO: ${esc(where(i.return_to))}</div></div>`).join("")}</div>`;
+       <div class="grow scroll col">${short}${r.items.map(i => `<div class="banner">${thumb(i.asset_id)}<div><div class="what">${esc(i.name)}</div><div class="where">RETURN TO: ${esc(where(i.return_to))}</div></div></div>`).join("")}</div>`;
   return [out ? "Checkout saved" : "Return saved", `${body}<button class="green" data-act="closesum">OK</button>`];
 }
 
@@ -274,7 +279,8 @@ function reportView(s) {
 function instHome() {
   return [`Instructor · ${st.instructor}`, `${msgBar("Scan a student's ID to help them, or pick a job")}
     <div class="row grow"><button class="grow blue" data-act="ipage" data-arg="start">Start for a student<div class="small">ID won't scan</div></button>
-      <button class="grow" data-act="ipage" data-arg="enroll">Link a new badge</button></div>
+      <button class="grow" data-act="ipage" data-arg="enroll">Link a new badge</button>
+      <button class="grow" data-act="ipage" data-arg="photo">📷 Take tool photos</button></div>
     <div class="row grow"><button class="grow" data-act="ipage" data-arg="loans">Loans &amp; due times</button>
       <button class="grow amber" data-act="ipage" data-arg="quarantine">Release a locked tool</button>
       <button class="grow red" data-act="logout">Log out</button></div>
@@ -297,6 +303,15 @@ function instPage() {
       <div class="small muted">${esc(l.holder || "?")} · due ${l.due_at ? esc(time(l.due_at)) : "?"}</div></div>
       <button class="sm" data-act="iextend" data-arg="${esc(l.asset_id)}|1">+1 hour</button><button class="sm" data-act="iextend" data-arg="${esc(l.asset_id)}|24">+1 day</button></div>`).join("")
       || `<p class="muted">No tools are checked out.</p>`}</div>`];
+  if (p.page === "photo") {
+    if (p.tool) { const id = p.tool.asset_id, has = photos[id];
+      return [`Photo · ${p.tool.name}`, `<div class="row">${back}</div><div class="row grow" style="align-items:center;gap:20px">
+        ${has ? thumb(id, "width:220px;height:220px") : `<div class="card blue" style="width:220px;height:220px;display:flex;align-items:center;justify-content:center;text-align:center">No photo yet</div>`}
+        <div class="col grow"><h2>Hold the ${esc(p.tool.name)} in front of the camera, label side out, against a plain background.</h2>
+        <button class="green" data-act="isnap">📷 ${has ? "Retake photo" : "Take photo"}</button></div></div>`]; }
+    return ["Photo for which tool?", picker(back, "Type the tool's name or number", p.results,
+      t => `<button class="grow list-btn sm" data-act="iptool" data-arg="${esc(t.asset_id)}"><span>${esc(t.name)}</span><span class="small muted">${photos[t.asset_id] ? "✓ photo" : esc(t.asset_id)}</span></button>`)];
+  }
   if (p.page === "quarantine") {
     if (p.tool) return [`Release ${p.tool.name}`, `<div class="row">${back}<h2 class="grow" style="align-self:center">What did you check?</h2></div>
       ${NOTES.map(n => `<button class="grow" data-act="iclear" data-arg="${esc(n)}">${esc(n)}</button>`).join("")}`];
@@ -353,7 +368,7 @@ async function search() {
   const p = ui.report?.step === "tool" ? ui.report : ui.inst;
   if (!p || p.page === "asset") return;
   const q = encodeURIComponent((p.q || "").trim());
-  if (ui.report) p.results = await call("GET", `/api/tools?q=${q}`);
+  if (ui.report || p.page === "photo") p.results = await call("GET", `/api/tools?q=${q}`);
   else if (p.page === "start" || p.page === "enroll") p.results = await call("GET", `/api/instructor/people?q=${q}`);
   else if (p.page === "loans") p.results = await call("GET", "/api/loans");
   else if (p.page === "quarantine") p.results = (await call("GET", "/api/tools")).filter(t => t.state === "quarantined");
@@ -396,6 +411,9 @@ const acts = {
   // instructor
   logout: () => go(() => call("POST", "/api/instructor/logout")),
   asset: () => { ui.inst = {page: "asset", q: ""}; render(); },
+  iptool: id => { ui.inst.tool = ui.inst.results.find(t => t.asset_id === id); render(); },
+  isnap: () => go(() => call("POST", "/api/instructor/tool_photo", {asset_id: ui.inst.tool.asset_id})
+    .then(r => { say(`Photo saved for ${r.name}`); return loadPhotos(); })),
   ipage: p => { ui.inst = {page: p, q: ""}; render(); search(); },
   iback: () => { const p = ui.inst; if (p.person || p.tool) { p.person = p.tool = null; render(); } else { ui.inst = null; render(); } },
   iperson: id => { const p = ui.inst, who = p.results.find(x => x.person_id === id);
@@ -427,6 +445,7 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("contextmenu", e => e.preventDefault());  // long-press menus
 poll(); setInterval(poll, 1000);
+loadPhotos(); setInterval(loadPhotos, 60000);  // photos synced down from the Sheet show up within a minute
 </script>
 </body>
 </html>

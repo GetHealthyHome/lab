@@ -188,6 +188,8 @@ MIGRATIONS = [
         SELECT asset_id, action, person_id, ts, txn_id, due_at, MAX(rowid) FROM transactions GROUP BY asset_id
     ) last ON last.asset_id = t.asset_id;
     """,
+    # Tool photos for the kiosk screen: local path on the Pi (the Sheet gets the Drive link).
+    "ALTER TABLE tools ADD COLUMN photo TEXT",
 ]
 
 

@@ -44,7 +44,7 @@ def sync_once(conn: sqlite3.Connection, sink: Sink, limit: int = 100) -> int:
             )
             break
         conn.execute("UPDATE sync_queue SET sent_at = ?, attempts = attempts + 1 WHERE id = ?", (now_iso(), row["id"]))
-        if row["kind"] == "photo" and not payload.get("keep"):  # reference photos stay: spots are compared against them
+        if row["kind"] == "photo" and not payload.get("keep"):  # reference and tool photos stay: the Pi still uses them
             # PRD Storage: the Pi deletes its local copy once Drive has it.
             try:
                 os.remove(payload["path"])
