@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# kiosk (python)
+__pycache__/
+*.egg-info/
+kiosk/.venv/
+kiosk/*.db*

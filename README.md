@@ -1,5 +1,7 @@
 # LAB toolbox
 
+> **New:** the Raspberry Pi checkout kiosk that replaces this app is being built in [`kiosk/`](kiosk/README.md). The Next.js app below is the current version until that is ready.
+
 Mobile-first PWA for checking tools and kits in and out of the hands-on HVAC lab by scanning their barcodes.
 
 ## Stack

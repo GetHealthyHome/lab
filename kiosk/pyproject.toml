@@ -1,0 +1,17 @@
+[project]
+name = "lab-toolbox-kiosk"
+version = "0.1.0"
+description = "Lab Toolbox checkout kiosk (Raspberry Pi): FastAPI + SQLite"
+requires-python = ">=3.11"
+dependencies = ["fastapi", "uvicorn", "numpy", "pillow"]
+
+[project.optional-dependencies]
+pi = ["zxing-cpp", "picamera2"]
+dev = ["pytest", "httpx", "zxing-cpp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+packages = ["lab_toolbox"]
+package-data = { lab_toolbox = ["static/*"] }

@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- Placeholder screen for bench testing only. The real kiosk UI is still being designed; it will use the same /api endpoints. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab Toolbox kiosk (placeholder)</title>
+<style>
+  body { font: 20px system-ui, sans-serif; margin: 24px; background: #fff; color: #111; }
+  button { font-size: 22px; min-height: 60px; min-width: 160px; margin: 6px; }
+  input { font-size: 22px; padding: 8px; width: 320px; }
+  #msg { margin: 12px 0; padding: 12px; min-height: 1.5em; }
+  .ok { border: 4px solid #1a7f37; } .bad { border: 4px solid #cf222e; }
+  #bar { height: 14px; background: #1a7f37; transition: width 1s linear; }
+</style>
+</head>
+<body>
+<h1>Lab Toolbox</h1>
+<p>Type or paste a code and press Enter (a USB scanner works the same way).</p>
+<div><button id="out">Check out</button><button id="in">Return</button></div>
+<input id="code" autofocus placeholder="ID code first, then tool codes">
+<div id="msg"></div>
+<div id="bar" style="width:0"></div>
+<ul id="items"></ul>
+<button id="done">Done</button><button id="cancel">Cancel</button>
+<script>
+let action = "out";
+const $ = id => document.getElementById(id);
+const call = (method, url, body) => fetch(url, {method, headers: {"Content-Type": "application/json"},
+  body: body && JSON.stringify(body)}).then(async r => ({ok: r.ok, data: await r.json()}));
+const say = (text, ok) => { $("msg").textContent = text; $("msg").className = ok ? "ok" : "bad"; };
+$("out").onclick = () => { action = "out"; say("Check out: scan your ID", true); };
+$("in").onclick = () => { action = "in"; say("Return: scan your ID", true); };
+$("code").onkeydown = async e => {
+  if (e.key !== "Enter") return;
+  const code = e.target.value; e.target.value = "";
+  const st = (await call("GET", "/api/session")).data;
+  const r = st.session ? await call("POST", "/api/session/scan", {code})
+                       : await call("POST", "/api/session", {id_code: code, action});
+  say(r.ok ? (r.data.person ? `Hi, ${r.data.person}` : `Added ${r.data.name}`) : r.data.reason, r.ok);
+  refresh();
+};
+$("done").onclick = async () => {
+  const r = await call("POST", "/api/session/finish");
+  if (!r.ok) return say(r.data.reason, false);
+  say(r.data.items.map(i => i.return_to ? `${i.name}: RETURN TO ${i.return_to}` : i.name).join(" · ") || "Nothing scanned", true);
+  refresh();
+};
+$("cancel").onclick = async () => { await call("DELETE", "/api/session"); say("Cancelled", true); refresh(); };
+async function refresh() {
+  const st = (await call("GET", "/api/session")).data;
+  $("items").innerHTML = "";
+  (st.session?.items || []).forEach(i => { const li = document.createElement("li"); li.textContent = i.name; $("items").append(li); });
+  $("bar").style.width = st.session ? `${100 * st.seconds_left / st.idle_timeout}%` : "0";
+}
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>
