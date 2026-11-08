@@ -1,27 +1,7 @@
-# LAB toolbox
+# Lab Toolbox
 
-> **New:** the Raspberry Pi checkout kiosk that replaces this app is being built in [`kiosk/`](kiosk/README.md). The Next.js app below is the current version until that is ready.
+Self-service tool checkout kiosk for the Healthy Home Academy lab: a Raspberry Pi at the cage gate logs who took each tool, watches the cage for empty spots, and syncs to a Google Sheet with a staff dashboard.
 
-Mobile-first PWA for checking tools and kits in and out of the hands-on HVAC lab by scanning their barcodes.
+The kiosk service lives in [`kiosk/`](kiosk/README.md).
 
-## Stack
-Next.js (App Router) + Tailwind, Supabase (Postgres, RLS, email + password auth), ZXing camera scanning, IndexedDB outbox for offline scans.
-
-## Run it
-```bash
-cp .env.example .env.local   # fill in the server-only values if you want the nightly email
-npm install
-npm run dev
-```
-Sign in with the email and temporary password your admin gave you; the app makes you choose a new password on first sign-in. Admins create logins on the Admin page ("Add a person" with a temporary password), which calls the `admin-create-user` edge function in `supabase/functions/`; submitting an existing login's email with a new temporary password resets it. Roles and login links on `people` can only be changed by admins (database trigger), and self-service sign-up is refused.
-
-## How it works
-- **Codes.** A scanned value is matched against `assets.barcode`, `assets.serial`, `assets.id`, `locations.code` and `people.badge_code`. Print QR stickers whose value is the code you typed when adding the item.
-- **Check out.** Scan a tool, tap a name (or scan a badge / truck bin label), confirm. Default due time is end of today. Scanning a kit lists its contents; untick anything missing and it is flagged `lost`.
-- **Check in.** Scan the tool, rate its condition. Scan a shelf label first to deposit many tools into that bin in a row; otherwise the tool returns to its home bin.
-- **Audit.** Scan a bin label, then every tool in it; the list shows what is still unaccounted for.
-- **Offline.** Lookup tables are cached in IndexedDB on every page load. Scan actions made offline queue up and replay in order when the network returns.
-- **Nightly report.** `GET /api/reports/overdue` (Vercel cron at 03:00 UTC, authenticated with `CRON_SECRET`) emails admins and trainers the list of tools still out past their due time. Needs `SUPABASE_SERVICE_ROLE_KEY` and `RESEND_API_KEY`.
-
-## Database
-Schema lives in `supabase/migrations/` and is already applied to the "Lab Tool Tracker" Supabase project. Every scan action goes through the `record_movement()` Postgres function so kits, status, custody and history are updated atomically.
+The earlier Next.js + Supabase app was removed from this repo; it is still in git history (last version at commit `c794d24`).
