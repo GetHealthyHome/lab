@@ -1,0 +1,17 @@
+# Web service + gate camera reader. Copy to /etc/systemd/system/, then: systemctl enable --now lab-toolbox-kiosk
+[Unit]
+Description=Lab Toolbox kiosk (API, gate camera, buzzer)
+After=network.target
+
+[Service]
+User=kiosk
+# video: camera access, gpio: buzzer
+SupplementaryGroups=video gpio
+WorkingDirectory=/opt/lab-toolbox/kiosk
+EnvironmentFile=/etc/lab-toolbox.env
+ExecStart=/opt/lab-toolbox/kiosk/.venv/bin/uvicorn lab_toolbox.app:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

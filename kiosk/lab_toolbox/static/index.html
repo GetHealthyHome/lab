@@ -24,20 +24,18 @@
 <ul id="items"></ul>
 <button id="done">Done</button><button id="cancel">Cancel</button>
 <script>
-let action = "out";
+let lastSeq = 0;
 const $ = id => document.getElementById(id);
 const call = (method, url, body) => fetch(url, {method, headers: {"Content-Type": "application/json"},
   body: body && JSON.stringify(body)}).then(async r => ({ok: r.ok, data: await r.json()}));
 const say = (text, ok) => { $("msg").textContent = text; $("msg").className = ok ? "ok" : "bad"; };
-$("out").onclick = () => { action = "out"; say("Check out: scan your ID", true); };
-$("in").onclick = () => { action = "in"; say("Return: scan your ID", true); };
+const mode = action => call("POST", "/api/mode", {action});
+$("out").onclick = () => { mode("out"); say("Check out: scan your ID", true); };
+$("in").onclick = () => { mode("in"); say("Return: scan your ID", true); };
 $("code").onkeydown = async e => {
   if (e.key !== "Enter") return;
   const code = e.target.value; e.target.value = "";
-  const st = (await call("GET", "/api/session")).data;
-  const r = st.session ? await call("POST", "/api/session/scan", {code})
-                       : await call("POST", "/api/session", {id_code: code, action});
-  say(r.ok ? (r.data.person ? `Hi, ${r.data.person}` : `Added ${r.data.name}`) : r.data.reason, r.ok);
+  await call("POST", "/api/code", {code});  // same path as a camera scan; refresh() shows the result
   refresh();
 };
 $("done").onclick = async () => {
@@ -49,6 +47,8 @@ $("done").onclick = async () => {
 $("cancel").onclick = async () => { await call("DELETE", "/api/session"); say("Cancelled", true); refresh(); };
 async function refresh() {
   const st = (await call("GET", "/api/session")).data;
+  const ev = st.last_event;
+  if (ev && ev.seq !== lastSeq) { lastSeq = ev.seq; say(ev.text, ev.ok); }
   $("items").innerHTML = "";
   (st.session?.items || []).forEach(i => { const li = document.createElement("li"); li.textContent = i.name; $("items").append(li); });
   $("bar").style.width = st.session ? `${100 * st.seconds_left / st.idle_timeout}%` : "0";
