@@ -1,0 +1,8 @@
+#!/bin/sh
+# initramfs hook: copies the tools lab-toolbox-split needs into the initramfs.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+. /usr/share/initramfs-tools/hook-functions
+for t in e2fsck resize2fs sfdisk mke2fs blkid; do copy_exec "$(command -v $t)" /sbin; done
+copy_file config /etc/mke2fs.conf /etc/mke2fs.conf

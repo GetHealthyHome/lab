@@ -1,0 +1,17 @@
+{
+  "URLBlocklist": ["*"],
+  "URLAllowlist": ["http://127.0.0.1:8000"],
+  "DeveloperToolsAvailability": 2,
+  "DownloadRestrictions": 3,
+  "PrintingEnabled": false,
+  "BrowserSignin": 0,
+  "BrowserAddPersonEnabled": false,
+  "BrowserGuestModeEnabled": false,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "TranslateEnabled": false,
+  "SpellcheckEnabled": false,
+  "DefaultNotificationsSetting": 2,
+  "DefaultGeolocationSetting": 2
+}
