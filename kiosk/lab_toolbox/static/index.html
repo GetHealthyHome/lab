@@ -24,7 +24,7 @@
 <ul id="items"></ul>
 <button id="done">Done</button><button id="cancel">Cancel</button>
 <script>
-let lastSeq = 0;
+let lastSeq = 0, needPin = false;
 const $ = id => document.getElementById(id);
 const call = (method, url, body) => fetch(url, {method, headers: {"Content-Type": "application/json"},
   body: body && JSON.stringify(body)}).then(async r => ({ok: r.ok, data: await r.json()}));
@@ -35,7 +35,10 @@ $("in").onclick = () => { mode("in"); say("Return: scan your ID", true); };
 $("code").onkeydown = async e => {
   if (e.key !== "Enter") return;
   const code = e.target.value; e.target.value = "";
-  await call("POST", "/api/code", {code});  // same path as a camera scan; refresh() shows the result
+  if (needPin) {  // a PIN prompt is showing: the box takes the 4 digits
+    const r = await call("POST", "/api/pin", {pin: code});
+    if (!r.ok) say(r.data.reason, false);
+  } else await call("POST", "/api/code", {code});  // same path as a camera scan; refresh() shows the result
   refresh();
 };
 $("done").onclick = async () => {
@@ -49,6 +52,9 @@ async function refresh() {
   const st = (await call("GET", "/api/session")).data;
   const ev = st.last_event;
   if (ev && ev.seq !== lastSeq) { lastSeq = ev.seq; say(ev.text, ev.ok); }
+  needPin = st.instructor_pin || (st.session && st.session.pin !== "ok");
+  $("code").type = needPin ? "password" : "text";
+  $("code").placeholder = needPin ? "Type your 4-digit PIN" : "ID code first, then tool codes";
   $("items").innerHTML = "";
   (st.session?.items || []).forEach(i => { const li = document.createElement("li"); li.textContent = i.name; $("items").append(li); });
   $("bar").style.width = st.session ? `${100 * st.seconds_left / st.idle_timeout}%` : "0";
