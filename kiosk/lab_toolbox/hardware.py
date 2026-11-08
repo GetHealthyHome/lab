@@ -66,6 +66,8 @@ SOUNDS = {
     "accepted": [(2000, 0.08)],                                   # short high beep
     "saved": [(1000, 0.12), (1300, 0.12), (1700, 0.2)],           # rising three-note chime
     "rejected": [(250, 0.15), (0, 0.08), (250, 0.15)],            # low double buzz
+    "wrong_battery": [(900, 0.2), (600, 0.3)],                     # falling two-tone
+    "locked": [(700, 0.12), (1000, 0.12)] * 4,                     # warble alarm
 }
 
 

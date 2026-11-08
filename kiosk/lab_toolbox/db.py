@@ -112,6 +112,82 @@ MIGRATIONS = [
     "CREATE TABLE drive_photos (path TEXT PRIMARY KEY, file_id TEXT NOT NULL, link TEXT NOT NULL)",
     # Cage monitor: when an open alert was last confirmed by a snapshot (C6 updates instead of repeating).
     "ALTER TABLE alerts ADD COLUMN last_seen TEXT",
+    # K7, K8, K11-K17: PINs and lockout, batteries, kits, damage, worn labels, loan due times.
+    """
+    ALTER TABLE people ADD COLUMN email TEXT;
+    ALTER TABLE people ADD COLUMN failed_pin_attempts INTEGER NOT NULL DEFAULT 0;  -- local only, never synced
+    ALTER TABLE people ADD COLUMN locked_until TEXT;
+    ALTER TABLE tools ADD COLUMN serial TEXT;
+    ALTER TABLE tools ADD COLUMN brand TEXT;
+    ALTER TABLE tools ADD COLUMN model TEXT;
+    ALTER TABLE tools ADD COLUMN needs_battery INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE tools ADD COLUMN battery_group_id TEXT;
+    ALTER TABLE tools ADD COLUMN is_battery INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE transactions ADD COLUMN paired_battery_id TEXT;
+    ALTER TABLE transactions ADD COLUMN kit_id TEXT;
+    ALTER TABLE transactions ADD COLUMN due_at TEXT;
+    ALTER TABLE alerts ADD COLUMN details TEXT;
+    CREATE TABLE battery_groups (group_id TEXT PRIMARY KEY, name TEXT NOT NULL);  -- "DeWalt 20V Max"
+    CREATE TABLE kits (
+        kit_id TEXT PRIMARY KEY,
+        case_code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        spot_id TEXT,
+        check_mode TEXT NOT NULL DEFAULT 'standard' CHECK (check_mode IN ('standard', 'verified')),
+        -- "out" is derived from its pieces' transactions, like a tool's
+        status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'incomplete'))
+    );
+    CREATE TABLE kit_items (
+        kit_id TEXT NOT NULL REFERENCES kits(kit_id),
+        asset_id TEXT NOT NULL REFERENCES tools(asset_id),
+        PRIMARY KEY (kit_id, asset_id)
+    );
+    CREATE TABLE damage_reports (
+        report_id TEXT PRIMARY KEY,
+        asset_id TEXT NOT NULL REFERENCES tools(asset_id),
+        reported_by TEXT REFERENCES people(person_id),
+        severity TEXT NOT NULL CHECK (severity IN ('minor', 'needs_inspection', 'safety_hazard')),
+        tags TEXT,
+        notes TEXT,
+        photo TEXT,
+        opened TEXT NOT NULL,
+        resolved_by TEXT,
+        resolution TEXT,
+        resolved_at TEXT
+    );
+    CREATE TABLE reprint_queue (
+        reprint_id TEXT PRIMARY KEY,
+        asset_id TEXT NOT NULL REFERENCES tools(asset_id),
+        reported_by TEXT REFERENCES people(person_id),
+        condition TEXT NOT NULL CHECK (condition IN ('Faded', 'Scratched', 'Peeling', 'Torn')),
+        flagged_at TEXT NOT NULL
+    );
+    -- K16: an instructor's new due time for one checkout. Transactions stay append-only.
+    CREATE TABLE loan_extensions (
+        txn_id TEXT NOT NULL REFERENCES transactions(txn_id),
+        due_at TEXT NOT NULL,
+        by TEXT NOT NULL,
+        ts TEXT NOT NULL,
+        reason TEXT
+    );
+    DROP VIEW tool_state;
+    CREATE VIEW tool_state AS
+    SELECT t.*,
+           CASE WHEN t.status != 'available' THEN t.status
+                WHEN last.action = 'out' THEN 'out'
+                ELSE 'available' END AS state,
+           last.action AS last_action,
+           CASE WHEN last.action = 'out' THEN last.person_id END AS holder_id,
+           CASE WHEN last.action = 'out' THEN last.ts END AS out_since,
+           CASE WHEN last.action = 'out' THEN last.txn_id END AS out_txn_id,
+           CASE WHEN last.action = 'out' THEN COALESCE(
+               (SELECT e.due_at FROM loan_extensions e WHERE e.txn_id = last.txn_id ORDER BY e.rowid DESC LIMIT 1),
+               last.due_at) END AS due_at
+    FROM tools t
+    LEFT JOIN (
+        SELECT asset_id, action, person_id, ts, txn_id, due_at, MAX(rowid) FROM transactions GROUP BY asset_id
+    ) last ON last.asset_id = t.asset_id;
+    """,
 ]
 
 
@@ -131,6 +207,17 @@ def migrate(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     for i, sql in enumerate(MIGRATIONS[version:], start=version + 1):
         conn.executescript(f"BEGIN; {sql}; PRAGMA user_version = {i}; COMMIT;")
+
+
+def setting(conn: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
+    """A Settings value (synced down from the Sheet), or the default when it's missing or blank."""
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row and str(row["value"]).strip() != "" else default
+
+
+def flag(conn: sqlite3.Connection, key: str, default: bool) -> bool:
+    v = setting(conn, key)
+    return default if v is None else v.strip().lower() not in ("no", "false", "0", "off", "n")
 
 
 def now_iso() -> str:

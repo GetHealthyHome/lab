@@ -21,7 +21,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from . import db
-from .db import tx
+from .db import setting, tx
 from .spots import classify, decide, load_gray
 from .sync import enqueue
 
@@ -40,11 +40,6 @@ def _ts(s: str) -> datetime:
 
 def _iso(t: datetime) -> str:
     return t.isoformat(timespec="seconds")
-
-
-def setting(conn, key: str) -> str | None:
-    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else None
 
 
 def interval(conn) -> timedelta:
