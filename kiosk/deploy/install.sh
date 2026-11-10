@@ -24,10 +24,12 @@ if ! blkid -L LTDATA >/dev/null 2>&1; then
 	[ "$disk_gb" -ge $((ROOT_GB + 6)) ] || { echo "The SD card is ${disk_gb} GB; use a 16 GB or bigger card."; exit 1; }
 	say "Step 1 of 2: making room for a data partition"
 	apt-get update
-	apt-get install -y initramfs-tools e2fsprogs fdisk zstd # zstd: lsinitramfs needs it to open the startup file
+	apt-get install -y initramfs-tools e2fsprogs fdisk
 	install -m755 "$DEPLOY/initramfs/lab-toolbox-hook" /etc/initramfs-tools/hooks/lab-toolbox
 	install -m755 "$DEPLOY/initramfs/lab-toolbox-split" /etc/initramfs-tools/scripts/local-premount/lab-toolbox-split
 	grep -q '^auto_initramfs=1' "$BOOT/config.txt" || echo 'auto_initramfs=1' >>"$BOOT/config.txt"
+	# gzip, not trixie's default zstd: every kernel unpacks it and lsinitramfs reads it without extra tools
+	echo COMPRESS=gzip >/etc/initramfs-tools/conf.d/lab-toolbox
 	kv=$(uname -r)
 	if [ -e "/boot/initrd.img-$kv" ]; then update-initramfs -u -k "$kv"; else update-initramfs -c -k "$kv"; fi
 	# The firmware loads initramfs8 next to kernel8.img (Pi 3, 64-bit); newer Pi OS doesn't always put it there
