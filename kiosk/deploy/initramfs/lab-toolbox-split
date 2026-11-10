@@ -27,7 +27,8 @@ log_begin_msg "Lab Toolbox: making the data partition (about a minute)"
 e2fsck -fy "$dev"
 # e2fsck exit 0 or 1 means clean or fixed; anything else, leave the card alone
 [ $? -le 1 ] || { log_failure_msg "e2fsck failed; data partition not made"; exit 0; }
-resize2fs "$dev" "${size}G" || { log_failure_msg "resize2fs failed; data partition not made"; exit 0; }
+# -f: the Pi has no clock this early, so resize2fs mistakes the fsck above for one older than the last mount
+resize2fs -f "$dev" "${size}G" || { log_failure_msg "resize2fs failed; data partition not made"; exit 0; }
 echo ",${size}GiB" | sfdisk -N 2 "$disk" || { log_failure_msg "sfdisk resize failed"; exit 0; }
 echo ",,L" | sfdisk --append "$disk" || { log_failure_msg "sfdisk append failed"; exit 0; }
 udevadm settle
