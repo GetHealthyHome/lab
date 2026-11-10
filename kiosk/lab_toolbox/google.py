@@ -129,7 +129,15 @@ class GoogleSink:
 
     def _header(self, tab: str) -> list[str]:
         if tab not in self._headers:
-            rows = self._get(f"{tab}!1:1")
+            try:
+                rows = self._get(f"{tab}!1:1")
+            except GoogleError as e:
+                if "Unable to parse range" not in str(e):
+                    raise
+                # The tab isn't in the Sheet: add it, so one missed during setup doesn't hold up the whole queue
+                self._ok(self.http.post(f"{SHEETS}/{self.sheet_id}:batchUpdate",
+                                        json={"requests": [{"addSheet": {"properties": {"title": tab}}}]}))
+                rows = []
             self._headers[tab] = [str(c) for c in rows[0]] if rows else []
         return self._headers[tab]
 

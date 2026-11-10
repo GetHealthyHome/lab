@@ -24,6 +24,7 @@ class FakeGoogle:
         self.tabs = tabs or {}
         self.files = {}
         self.down = False
+        self.strict = False  # True: reading a tab that doesn't exist fails, as the real Sheets API does
 
     def _tab(self, url):
         rng = unquote(url.split("/values/")[1]).removesuffix(":append")
@@ -33,6 +34,8 @@ class FakeGoogle:
         if self.down:
             raise ConnectionError("offline")
         tab, rng = self._tab(url)
+        if self.strict and tab not in self.tabs:
+            return Resp({"error": {"code": 400, "message": f"Unable to parse range: {rng}"}}, 400)
         rows = self.tabs.get(tab, [])
         return Resp({"values": rows[:1] if rng.endswith("1:1") else rows})
 
@@ -47,6 +50,9 @@ class FakeGoogle:
     def post(self, url, params=None, json=None, files=None):
         if self.down:
             raise ConnectionError("offline")
+        if "requests" in (json or {}):
+            self.tabs[json["requests"][0]["addSheet"]["properties"]["title"]] = [[]]
+            return Resp({})
         if url.endswith(":batchUpdate"):
             for d in json["data"]:
                 tab, cell = unquote(d["range"]).split("!")
@@ -286,3 +292,11 @@ def test_tool_photo_stays_on_pi_and_survives_a_pull(conn, tmp_path, clock):
     g.tabs.update(Spots=[["spot_id", "label"]], People=[["person_id"]])
     sink.pull()
     assert conn.execute("SELECT photo FROM tools WHERE asset_id = 'HHA-0001'").fetchone()[0] == str(tmp_path / "drill.jpg")
+
+
+def test_missing_tab_is_created(conn):
+    google = FakeGoogle({"People": [["person_id"]]})
+    google.strict = True
+    GoogleSink(google, conn, "SHEET", "FOLDER").report_health("gate-1")
+    header, row = google.tabs["Health"]
+    assert header[0] == "kiosk_id" and row[0] == "gate-1"
