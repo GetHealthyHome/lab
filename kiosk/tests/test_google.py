@@ -340,3 +340,15 @@ def test_drive_login_waits_for_approval_then_makes_the_folder():
     http.answers[1] = Resp({"error": "access_denied"}, 403)
     with pytest.raises(SystemExit, match="access_denied"):
         drive_login.login({"client_id": "C", "client_secret": "S"}, http, sleep=waits.append, say=said.append)
+
+
+def test_pull_survives_a_mistyped_role(conn):
+    g = FakeGoogle({
+        "Spots": [["spot_id"]], "Tools": [["asset_id"]],
+        "People": [["person_id", "id_code", "name", "role", "active"], ["P-7", "ID-7", "Pat", "Admin", ""],
+                   ["P-8", "ID-8", "Lee", " Instructor ", "no"]],
+    })
+    assert GoogleSink(g, conn, "S", "F").pull()["People"] == 2
+    got = {r["person_id"]: (r["role"], r["active"]) for r in conn.execute("SELECT * FROM people WHERE person_id IN ('P-7', 'P-8')")}
+    # unknown role: least access, and the rest still syncs. Blank active: active, as the dashboard reads it.
+    assert got == {"P-7": ("student", 1), "P-8": ("instructor", 0)}

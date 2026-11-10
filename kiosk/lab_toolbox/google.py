@@ -194,14 +194,18 @@ class GoogleSink:
                 if t.get("photo"):  # Drive link back to the Pi's own copy; a blank cell never wipes a photo taken here
                     self.conn.execute("UPDATE tools SET photo = ? WHERE asset_id = ?", (local.get(t["photo"], t["photo"]), t["asset_id"]))
             for p in people:
+                # A typo in the role column must not stop the whole pull; least access is the safe reading of it.
+                role = str(p.get("role") or "student").strip().lower()
                 self.conn.execute(
                     "INSERT INTO people (person_id, id_code, name, role, pin_hash, active, email)"
                     " VALUES (:person_id, :id_code, :name, :role, :pin_hash, :active, :email)"
                     " ON CONFLICT(person_id) DO UPDATE SET id_code=excluded.id_code, name=excluded.name,"
                     " role=excluded.role, pin_hash=excluded.pin_hash, active=excluded.active, email=excluded.email",
                     {"person_id": p["person_id"], "id_code": p["id_code"], "name": p["name"], "email": p.get("email") or None,
-                     "role": (p.get("role") or "student").lower(), "pin_hash": p.get("pin_hash") or None,
-                     "active": _truthy(p.get("active", True))},
+                     "role": role if role in ("student", "instructor", "supervisor") else "student",
+                     "pin_hash": p.get("pin_hash") or None,
+                     # blank means active, as on the dashboard: only an explicit no switches a person off
+                     "active": _truthy(p["active"]) if str(p.get("active", "")).strip() else 1},
                 )
             for st in settings:
                 self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
