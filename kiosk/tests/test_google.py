@@ -300,3 +300,43 @@ def test_missing_tab_is_created(conn):
     GoogleSink(google, conn, "SHEET", "FOLDER").report_health("gate-1")
     header, row = google.tabs["Health"]
     assert header[0] == "kiosk_id" and row[0] == "gate-1"
+
+
+def test_photos_go_up_under_the_drive_sign_in_when_there_is_one(conn, tmp_path):
+    sheet, drive = FakeGoogle(), FakeGoogle()
+    sink = GoogleSink(sheet, conn, "S", "F", drive=drive)
+    (tmp_path / "p.jpg").write_bytes(b"jpg")
+    sink.send("photo", {"path": str(tmp_path / "p.jpg")})
+    assert len(drive.files) == 1 and not sheet.files
+
+
+def test_drive_login_waits_for_approval_then_makes_the_folder():
+    from lab_toolbox import drive_login
+
+    class Http:
+        def __init__(self):
+            self.answers = [
+                Resp({"device_code": "D", "user_code": "ABCD-EFGH", "verification_url": "https://www.google.com/device",
+                      "expires_in": 1800, "interval": 5}),
+                Resp({"error": "authorization_pending"}, 428),
+                Resp({"error": "slow_down"}, 403),
+                Resp({"access_token": "AT", "refresh_token": "RT"}),
+                Resp({"id": "FOLDER"}),
+            ]
+            self.calls = []
+
+        def post(self, url, **kw):
+            self.calls.append((url, kw))
+            return self.answers.pop(0)
+
+    http, said, waits = Http(), [], []
+    info = drive_login.login({"installed": {"client_id": "C", "client_secret": "S"}}, http, sleep=waits.append, say=said.append)
+    assert info == {"type": "authorized_user", "client_id": "C", "client_secret": "S", "refresh_token": "RT", "folder_id": "FOLDER"}
+    assert "ABCD-EFGH" in said[0] and waits == [5, 5, 10]  # slow_down: back off
+    assert http.calls[-1][1]["headers"] == {"Authorization": "Bearer AT"}
+    assert http.calls[-1][1]["json"]["mimeType"] == "application/vnd.google-apps.folder"
+
+    http = Http()
+    http.answers[1] = Resp({"error": "access_denied"}, 403)
+    with pytest.raises(SystemExit, match="access_denied"):
+        drive_login.login({"client_id": "C", "client_secret": "S"}, http, sleep=waits.append, say=said.append)

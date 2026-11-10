@@ -2,6 +2,7 @@
 
 Every PUSH_SECONDS it drains the outbox to Google; every PULL_SECONDS it copies tools, spots and people down.
 Run: KIOSK_DB=kiosk.db GOOGLE_KEY_FILE=/data/key.json SHEET_ID=... DRIVE_FOLDER_ID=... python -m lab_toolbox.sync_service
+Without a Shared Drive, run lab_toolbox.drive_login once: photos then go up under that person's sign-in.
 """
 import logging
 import os
@@ -34,7 +35,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     conn = db.connect(os.environ.get("KIOSK_DB", "kiosk.db"))
     sink = GoogleSink.from_service_account(
-        os.environ["GOOGLE_KEY_FILE"], conn, os.environ["SHEET_ID"], os.environ["DRIVE_FOLDER_ID"]
+        os.environ["GOOGLE_KEY_FILE"], conn, os.environ["SHEET_ID"], os.environ.get("DRIVE_FOLDER_ID", ""),
+        os.environ.get("GOOGLE_USER_FILE", "/data/google-user.json"),
     )
     last_pull = 0.0
     while True:
