@@ -35,7 +35,7 @@ if ! blkid -L LTDATA >/dev/null 2>&1; then
 	# The firmware loads initramfs8 next to kernel8.img (Pi 3, 64-bit); newer Pi OS doesn't always put it there
 	[ -e "$BOOT/kernel8.img" ] || { echo "$BOOT/kernel8.img not found; send the output of: ls $BOOT"; exit 1; }
 	cp "/boot/initrd.img-$kv" "$BOOT/initramfs8"
-	lsinitramfs "$BOOT/initramfs8" | grep -q lab-toolbox-split ||
+	lsinitramfs "$BOOT/initramfs8" | grep lab-toolbox-split >/dev/null || # not -q: an early exit breaks the pipe and pipefail fails it
 		{ echo "The startup file doesn't contain the partition step; not rebooting. Send this screen."; exit 1; }
 	grep -q labtoolbox_split "$CMDLINE" || sed -i "1 s/\$/ labtoolbox_split=$ROOT_GB/" "$CMDLINE"
 	say "Rebooting. The first boot takes a minute longer. When you can log in again, run this same command."
