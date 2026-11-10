@@ -352,3 +352,48 @@ def test_pull_survives_a_mistyped_role(conn):
     got = {r["person_id"]: (r["role"], r["active"]) for r in conn.execute("SELECT * FROM people WHERE person_id IN ('P-7', 'P-8')")}
     # unknown role: least access, and the rest still syncs. Blank active: active, as the dashboard reads it.
     assert got == {"P-7": ("student", 1), "P-8": ("instructor", 0)}
+
+
+def test_database_copy_goes_to_its_own_private_drive_folder(conn, tmp_path):
+    import sqlite3
+
+    class Drive:
+        def __init__(self):
+            self.files, self.calls = {}, []  # id -> {name, parents, body}
+
+        def get(self, url, params=None):
+            q = params["q"]
+            hits = [{"id": i} for i, f in self.files.items()
+                    if f"name = '{f['name']}'" in q and (f["parents"] == [] or f"'{f['parents'][0]}' in parents" in q)]
+            return Resp({"files": hits})
+
+        def post(self, url, params=None, json=None, files=None):
+            self.calls.append("post")
+            fid = f"D{len(self.files) + 1}"
+            meta = json or __import__("json").loads(files["metadata"][1])
+            self.files[fid] = {"name": meta["name"], "parents": meta.get("parents", []),
+                               "body": files["file"][1].read() if files else None}
+            return Resp({"id": fid})
+
+        def patch(self, url, params=None, data=None, headers=None):
+            self.calls.append("patch")
+            self.files[url.rsplit("/", 1)[1]]["body"] = data.read()
+            return Resp({})
+
+    sheet, drive = FakeGoogle(), Drive()
+    assert GoogleSink(sheet, conn, "S", "F").backup_database("kiosk-Tue.db") is False  # no personal sign-in: nowhere private
+    sink = GoogleSink(sheet, conn, "S", "PHOTOS", drive=drive)
+    assert sink.backup_database("kiosk-Tue.db")
+    folder, copy = drive.files["D1"], drive.files["D2"]
+    assert folder["name"] == "Lab Toolbox backups" and folder["parents"] == []  # not inside the shared photo folder
+    assert copy["name"] == "kiosk-Tue.db" and copy["parents"] == ["D1"]
+    (tmp_path / "restored.db").write_bytes(copy["body"])
+    people = sqlite3.connect(tmp_path / "restored.db").execute("SELECT COUNT(*) FROM people").fetchone()[0]
+    assert people == conn.execute("SELECT COUNT(*) FROM people").fetchone()[0] > 0
+
+    conn.execute("INSERT INTO settings VALUES ('marker', 'next week')")
+    assert sink.backup_database("kiosk-Tue.db")  # a week later: same file replaced, no second folder
+    assert len(drive.files) == 2 and drive.calls == ["post", "post", "patch"]
+    (tmp_path / "restored.db").write_bytes(drive.files["D2"]["body"])
+    assert sqlite3.connect(tmp_path / "restored.db").execute("SELECT value FROM settings WHERE key = 'marker'").fetchone()
+    assert not list(tmp_path.glob("*.drive"))  # the working copy is cleaned up

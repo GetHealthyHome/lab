@@ -15,6 +15,9 @@ from .sync import pending
 
 SHEETS = "https://sheets.googleapis.com/v4/spreadsheets"
 DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
+DRIVE_FILES = "https://www.googleapis.com/drive/v3/files"
+FOLDER_MIME = "application/vnd.google-apps.folder"
+BACKUP_FOLDER = "Lab Toolbox backups"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 # A person's sign-in is only asked for the files this app makes: all it needs, and all Google's device sign-in allows.
 DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
@@ -85,6 +88,42 @@ class GoogleSink:
         last = self.conn.execute("SELECT MAX(ts) FROM snapshots").fetchone()[0]
         self._append(HEALTH_TAB, {"kiosk_id": kiosk_id, "last_sync": now_iso(), "queue_size": pending(self.conn),
                                   "last_snapshot": last}, "kiosk_id")
+
+    def backup_database(self, name: str) -> bool:
+        """Copy the whole database into the signed-in person's Drive as `name`, replacing an older file of
+        that name. False when there is nowhere private to put it."""
+        if self.drive is self.http:
+            # shortcut: needs the personal sign-in (drive_login). The copy holds PIN hashes, and with only a
+            # Shared Drive every member could read it; add a restricted folder when a lab runs that way.
+            return False
+        # Its own folder, not the photo folder: that one is shared with staff. This app only sees files it made.
+        folder = self._drive_id(BACKUP_FOLDER, f"mimeType = '{FOLDER_MIME}'") or self._ok(
+            self.drive.post(DRIVE_FILES, json={"name": BACKUP_FOLDER, "mimeType": FOLDER_MIME}))["id"]
+        copy = self.conn.execute("PRAGMA database_list").fetchone()[2] + ".drive"
+        dest = sqlite3.connect(copy)
+        try:
+            self.conn.backup(dest)  # a consistent copy even while the kiosk is writing
+        finally:
+            dest.close()
+        try:
+            old = self._drive_id(name, f"'{folder}' in parents")
+            # shortcut: one plain upload, fine for a database of a few MB; use a resumable upload past ~50 MB.
+            with open(copy, "rb") as f:
+                if old:
+                    self._ok(self.drive.patch(f"{DRIVE_UPLOAD}/{old}", params={"uploadType": "media"}, data=f,
+                                              headers={"Content-Type": "application/octet-stream"}))
+                else:
+                    self._ok(self.drive.post(DRIVE_UPLOAD, params={"uploadType": "multipart"}, files={
+                        "metadata": (None, json.dumps({"name": name, "parents": [folder]}), "application/json"),
+                        "file": (name, f, "application/octet-stream")}))
+        finally:
+            os.remove(copy)
+        return True
+
+    def _drive_id(self, name: str, where: str) -> str | None:
+        found = self._ok(self.drive.get(DRIVE_FILES, params={
+            "q": f"name = '{name}' and {where} and trashed = false", "fields": "files(id)"})).get("files")
+        return found[0]["id"] if found else None
 
     def _upload_photo(self, path: str) -> None:
         if self.conn.execute("SELECT 1 FROM drive_photos WHERE path = ?", (path,)).fetchone():
