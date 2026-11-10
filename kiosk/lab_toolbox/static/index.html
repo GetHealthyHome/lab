@@ -79,6 +79,7 @@ h1 { font-size:36px; font-weight:800; letter-spacing:-.02em; } h2 { font-size:27
 .pad { display:grid; grid-template-columns:repeat(3, 80px); gap:8px 16px; align-content:center; }
 .pad button { font-size:34px; border-radius:50%; height:80px; padding:0; background:var(--raised); }
 .pad button.red { border-radius:50%; background:transparent; color:var(--red); border:1px solid var(--line); box-shadow:none; }
+.pad button.green { background:var(--green); color:var(--on-green); }
 .dots { display:inline-flex; align-self:flex-start; gap:22px; padding:16px 26px; border-radius:40px; background:var(--panel); border:1px solid var(--line); }
 .dots b { width:26px; height:26px; border-radius:50%; background:var(--raised); transition:all .15s; }
 .dots b.f { background:var(--blue); transform:scale(1.15); box-shadow:var(--glow) color-mix(in srgb, var(--blue) 60%, transparent); }
@@ -417,7 +418,7 @@ const acts = {
     render();
     if (k === "✓" || ui.pin.length === PIN_LEN) { const pin = ui.pin; ui.pin = ""; go(() => call("POST", "/api/pin", {pin}).then(() => { ui.pad = null; })); }
   },
-  qr: () => go(() => call("POST", "/api/qr")),
+  qr: () => go(() => call("POST", "/api/qr").then(() => say("Hold the tool's QR label up to the camera"))),
   remove: id => go(() => call("POST", "/api/session/remove", {asset_id: id}).then(() => say("Removed from your list"))),
   done: () => go(async () => {
     const r = await call("POST", "/api/session/finish");
