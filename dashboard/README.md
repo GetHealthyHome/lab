@@ -20,9 +20,9 @@ A Google Apps Script web app that lives inside the Lab Toolbox Sheet. The Pi wri
 Every change made here writes one AuditLog row per changed cell: who, when, old value, new value and why (D7). Editing an existing row needs a reason. Rows in Tools, People, Spots and Kits are retired, never deleted, because records and history point at them by their key.
 
 ## Who can use it
-Staff are People rows with an `email` and a `role` of `instructor` or `supervisor` (and `active` not set to no). Instructors can do everything except change Records, Settings and PINs, which are supervisor-only. The Google account that deploys the script is always treated as a supervisor, so a new Sheet can be set up before anyone's email is in it.
+Staff are People rows with an `email` and a `role` of `instructor` or `supervisor` (and `active` not set to no). Instructors can do everything except change Records, Settings and PINs, which are supervisor-only. The Google account that owns the Sheet is always treated as a supervisor, so a new Sheet can be set up before anyone's email is in it (in a Shared Drive, where a Sheet has no owner, it is the account that deploys the script).
 
-This assumes staff sign in with accounts in your Google Workspace domain (the PRD's first open question). If staff use personal Google accounts instead, change `webapp.access` in `appsscript.json` to `ANYONE` and `executeAs` to `USER_ACCESSING`, and share the Sheet with each staff member; the rest works the same.
+This assumes staff sign in with accounts in your Google Workspace domain (the PRD's first open question). If staff use personal Google accounts instead, change `webapp.access` in `appsscript.json` to `ANYONE` and `executeAs` to `USER_ACCESSING`, and share the Sheet with each staff member as an Editor (the script then runs as them, so they need to be able to write to it); the rest works the same.
 
 ## Install
 1. Open the Lab Toolbox Sheet, then **Extensions > Apps Script**.
@@ -31,6 +31,8 @@ This assumes staff sign in with accounts in your Google Workspace domain (the PR
 4. **Deploy > New deployment > Web app**. Execute as: **Me**. Who has access: **Anyone within your domain**. Open the URL it gives you and bookmark it for staff.
 5. On the dashboard's **Settings** page, fill in `alert_email` and `digest_email`, then press **Turn on emails** once (Google asks you to allow sending mail). Emails are sent from the deploying account. Each alert is emailed once; the Alerts tab's `emailed_at` column records when.
 6. Give staff **Viewer** access to the Drive photo folder so the photo thumbnails load. Photos stay private to staff (PRD Privacy).
+
+7. Optional: in the editor, pick `addDropdowns` in the function list and press **Run**. The fixed-choice columns (`role`, `active`, `status`, `check_mode`, `needs_battery`, `is_battery`) get a dropdown in the Sheet. It only warns about other values, never refuses them. Run it again after adding one of those columns.
 
 After pasting new versions of the files, use **Deploy > Manage deployments > Edit > New version** so the bookmarked URL serves them.
 

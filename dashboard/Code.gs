@@ -25,6 +25,31 @@ var OWN_TABS = {
   Settings: ['key', 'value'],
 };
 
+/**
+ * Run once from the Apps Script editor (and again after adding a column): gives the fixed-choice columns a dropdown,
+ * so nobody has to remember that an admin's role is spelled "supervisor".
+ */
+function addDropdowns() {
+  var yesNo = { People: ['active'], Tools: ['needs_battery', 'is_battery'] }, done = [];
+  Object.keys(SCHEMA).forEach(function (tab) {
+    var s = sheet_(tab);
+    if (!s || !s.getLastColumn() || s.getMaxRows() < 2) return;
+    var header = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim(); });
+    var lists = Object.assign({}, SCHEMA[tab].choices);
+    (yesNo[tab] || []).forEach(function (c) { lists[c] = ['yes', 'no']; });
+    Object.keys(lists).forEach(function (col) {
+      var i = header.indexOf(col);
+      if (i < 0) return;
+      // Warn, don't refuse: the Pi and this page write these cells too, and a refused write would stop them.
+      var rule = SpreadsheetApp.newDataValidation().requireValueInList(lists[col], true).setAllowInvalid(true).build();
+      s.getRange(2, i + 1, s.getMaxRows() - 1, 1).setDataValidation(rule);
+      done.push(tab + '.' + col);
+    });
+  });
+  console.log('Dropdowns added: ' + (done.join(', ') || 'none (no matching column headers yet)'));
+  return done;
+}
+
 function doGet() {
   return HtmlService.createTemplateFromFile('Index').evaluate()
     .setTitle('Lab Toolbox')
@@ -321,7 +346,7 @@ function withLock_(fn) {
 // -- who's asking ----------------------------------------------------------------------------------
 
 /**
- * Staff are People rows with an email and role instructor or supervisor. The script's owner is always a
+ * Staff are People rows with an email and role instructor or supervisor. The Sheet's owner is always a
  * supervisor, so a brand-new Sheet with no emails yet can still be set up.
  */
 function currentStaff_() {
@@ -332,7 +357,10 @@ function currentStaff_() {
       && ['instructor', 'supervisor'].indexOf(String(r.role).toLowerCase()) >= 0;
   })[0];
   if (p) return { email: email, person_id: String(p.person_id), name: String(p.name), role: String(p.role).toLowerCase() };
-  if (email === String(Session.getEffectiveUser().getEmail() || '').toLowerCase()) {
+  // The Sheet's owner, not the account the script runs as: deployed to run as whoever opens it (personal Google
+  // accounts), that account is the visitor, and every visitor would be a supervisor. A Shared Drive has no owner.
+  var owner = SpreadsheetApp.getActive().getOwner() || Session.getEffectiveUser();
+  if (email === String(owner.getEmail() || '').toLowerCase()) {
     return { email: email, person_id: '', name: email, role: 'supervisor' };
   }
   throw new Error(email + ' is not on the staff list. Ask a supervisor to add your email to your People row.');
