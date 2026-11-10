@@ -3,10 +3,12 @@
 Every PUSH_SECONDS it drains the outbox to Google; every PULL_SECONDS it copies tools, spots and people down.
 Run: KIOSK_DB=kiosk.db GOOGLE_KEY_FILE=/data/key.json SHEET_ID=... DRIVE_FOLDER_ID=... python -m lab_toolbox.sync_service
 Without a Shared Drive, run lab_toolbox.drive_login once: photos then go up under that person's sign-in.
+With that sign-in it also copies the whole database to Drive once a day, just after midnight (seven rotating files).
 """
 import logging
 import os
 import time
+from datetime import datetime
 
 from . import db, sync
 from .google import GoogleSink
@@ -39,7 +41,17 @@ def main() -> None:
         os.environ.get("GOOGLE_USER_FILE", "/data/google-user.json"),
     )
     last_pull = 0.0
+    backup_day, backup_retry = None, 0.0
     while True:
+        today = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[datetime.now().weekday()]  # kiosk local time
+        if today != backup_day and time.monotonic() >= backup_retry:
+            try:
+                if sink.backup_database(f"kiosk-{today}.db"):
+                    log.info("database copied to Drive as kiosk-%s.db", today)
+                backup_day = today
+            except Exception:  # must never hold up the Sheet sync below
+                log.exception("database copy to Drive failed; trying again in an hour")
+                backup_retry = time.monotonic() + 3600
         do_pull = time.monotonic() - last_pull >= PULL_SECONDS
         try:
             if run_once(conn, sink, do_pull, os.environ.get("KIOSK_ID", "gate-1")):
