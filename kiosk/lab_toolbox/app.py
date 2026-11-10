@@ -148,7 +148,7 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
     async def screen():
         return FileResponse(STATIC / "index.html")
 
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")  # logo.png / logo.svg
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")  # lab-logo.png, or a logo.png override
 
     @app.get("/api/session")
     async def get_session(request: Request):

@@ -32,9 +32,10 @@ gate camera. The photo stays on the Pi (the screen must work offline) and a copy
 column on the Tools tab. It then shows as a thumbnail in the scanning list and beside the RETURN TO banner. Tools without
 a photo just show their name.
 
-**Logo:** put the lab's logo at `lab_toolbox/static/logo.png` (square, transparent background, about 400 px) and restart the
-service. It shows large on the start screen and small in the corner of every other screen. Until then a dashed "LAB LOGO"
-placeholder (`static/logo.svg`) holds the spot.
+**Logo:** the Lab Toolbox logo ships as `lab_toolbox/static/lab-logo.png`. It shows large on the start screen and small in
+the corner of every other screen, on a white tile so its black lettering reads on the dark look too. To use a different
+logo without a code change, put it at `/data/logo.png` on the Pi (`install.sh` links `static/logo.png` there); it wins
+over the shipped one.
 
 ## What's here
 | Module | Job | PRD |
