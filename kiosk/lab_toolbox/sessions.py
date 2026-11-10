@@ -1,9 +1,10 @@
 """Checkout and return sessions at the gate (K2-K9, K11-K17).
 
 One kiosk, one screen, so at most one session is open at a time. A session is like a shopping basket:
-scans add to it, Done saves it as one loan record per tool, and walking away saves it after 45 seconds.
-An instructor can step in at any point (K7): scan their own badge, enter their PIN, and the kiosk takes
-instructor actions until they log out or walk away.
+people log in with their PIN (4 digits for students, 6 for staff), tool stickers are tapped on the NFC reader
+(or a printed QR code shown to the camera), each tool tapped out gets a photo of the person, Done saves one loan
+record per tool, and walking away saves it after 45 seconds. An instructor can step in at any point (K7): tap
+Instructor, enter their PIN, and the kiosk takes instructor actions until they log out or walk away.
 """
 import logging
 import sqlite3
@@ -14,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Callable, Protocol
 
 from . import loans, pins
-from .db import flag, now_iso, tx
+from .db import now_iso, tx
 from .sync import enqueue
 
 log = logging.getLogger(__name__)
@@ -61,7 +62,6 @@ class Session:
     person: dict
     items: list[dict] = field(default_factory=list)
     last_activity: float = 0.0
-    pin: str = "ok"  # "ok" | "check" (enter PIN) | "setup" (choose a PIN)
     override_by: dict | None = None  # instructor who started it for a student whose ID won't scan (K7)
     kits: dict = field(default_factory=dict)  # kit_id -> {name, mode, expect, got, confirmed} (K13)
 
@@ -83,11 +83,12 @@ class Kiosk:
         self.wall = wall
         self.idle_timeout = idle_timeout
         self.session: Session | None = None
-        self.next_action = "out"  # the screen's Check out / Return / Instructor choice for the next ID scan
+        self.next_action = "out"  # the screen's Check out / Return / Instructor choice for the next PIN
         self.instructor: dict | None = None  # logged-in instructor (K7)
         self.instructor_seen = 0.0
-        self.pending_instructor: dict | None = None  # badge scanned, PIN not entered yet
-        self.enroll_for: dict | None = None  # K17: the next scanned code becomes this person's badge
+        self.link_for: dict | None = None  # the next NFC sticker tapped becomes this tool's
+        self.pin_fails = 0  # wrong PINs in a row, any person: the PIN alone says who you are
+        self.pad_locked_until: datetime | None = None
 
     # -- session lifecycle -------------------------------------------------
 
@@ -102,104 +103,69 @@ class Kiosk:
             person = self.conn.execute("SELECT * FROM people WHERE id_code = ? AND active = 1", ((id_code or "").strip(),)).fetchone()
         if not person:
             raise Rejected("ID not recognized. Ask an instructor for help.")
-        self._refuse_if_locked(person)
         if action == "out" and not override_by:
             held = loans.held_for_overdue(self.conn, person["person_id"], self.wall())
             if held:
                 raise Rejected("Return your overdue tools first: " + ", ".join(h["name"] for h in held)
                                + ". Ask an instructor if you need more.", overdue=held)
-        pin = "ok"
-        if not override_by and flag(self.conn, "require_pin", True):
-            pin = "check" if person["pin_hash"] else "setup"
         p = {k: person[k] for k in ("person_id", "name", "role")}
-        self.session = Session(uuid.uuid4().hex, action, p, last_activity=self.clock(), pin=pin, override_by=override_by)
+        self.session = Session(uuid.uuid4().hex, action, p, last_activity=self.clock(), override_by=override_by)
         return self.session
 
     def handle(self, code: str) -> dict:
-        """One code from the gate camera: an enrolment card, an instructor badge, an ID, or a tool."""
+        """One tool code: an NFC sticker's UID, or a printed label read by the gate camera (the fallback)."""
         code = code.strip()
-        if self.enroll_for and self.instructor:
-            return self.enroll(self.enroll_for["person_id"], code)
-        staff = self.conn.execute(
-            f"SELECT * FROM people WHERE id_code = ? AND active = 1 AND role IN {STAFF}", (code,)).fetchone()
-        if staff and (self.next_action == "instructor" or (self.session and self.session.person["person_id"] != staff["person_id"])):
-            self.next_action = "out"
-            return self.begin_instructor(code)
+        if self.link_for and self.instructor:
+            return self.link_tag(self.link_for["asset_id"], code)
         if self.session:
             return self.scan(code)
-        s = self.start(code, "out" if self.next_action == "instructor" else self.next_action)
-        self.next_action = "out"
-        return self._started(s)
+        raise Rejected("Enter your PIN to start")
 
-    def _started(self, s: Session) -> dict:  # also used by the API's POST /api/session
-        return {"id": s.id, "action": s.action, "person": s.person["name"], "pin": s.pin}
+    def _started(self, s: Session) -> dict:  # also used by POST /api/instructor/start
+        return {"id": s.id, "action": s.action, "person": s.person["name"]}
 
-    # -- PINs (K11) ---------------------------------------------------------
+    # -- PIN login ----------------------------------------------------------
 
-    def enter_pin(self, pin: str) -> dict:
-        """Answers whichever PIN prompt is showing: the student's, or an instructor logging in."""
-        if self.pending_instructor:
-            person = self.pending_instructor
-            self._pin_ok(person, pin, setup=not person["pin_hash"])
-            self.pending_instructor = None
+    def login(self, pin: str) -> dict:
+        """The PIN pad: starts the chosen session, or logs an instructor in (Instructor button, any screen)."""
+        if self.pad_locked_until and self.wall() < self.pad_locked_until:
+            raise Locked("Too many wrong PINs. Wait a minute and try again.", until=self.pad_locked_until.isoformat(timespec="seconds"))
+        if not pins.valid(pin):
+            raise Rejected("Students: 4 digits. Instructors: 6 digits.")
+        person = pins.find(self.conn, pin)
+        if not person:
+            self._wrong_pin()
+        self.pin_fails = 0
+        if self.next_action == "instructor":
+            if person["role"] not in STAFF:
+                raise Rejected("Instructors only")
+            self.next_action = "out"
             self.instructor = {k: person[k] for k in ("person_id", "name", "role")}
             self.instructor_seen = self.clock()
             return {"instructor": self.instructor["name"]}
-        s = self.session
-        if not s or s.pin == "ok":
-            raise Rejected("Scan your ID to start")
-        person = self.conn.execute("SELECT * FROM people WHERE person_id = ?", (s.person["person_id"],)).fetchone()
-        try:
-            self._pin_ok(person, pin, setup=s.pin == "setup")
-        except Locked:
-            self.session = None
-            raise
-        s.pin = "ok"
-        s.last_activity = self.clock()
-        return {"person": s.person["name"], "pin": "ok"}
+        return self._started(self.start(None, self.next_action, person_id=person["person_id"]))
 
-    def _pin_ok(self, person, pin: str, setup: bool) -> None:
-        if not pins.valid(pin):
-            raise Rejected("A PIN is 4 digits")
-        if setup:  # first time (or after a reset on the dashboard): this PIN becomes theirs
-            h = pins.hash_pin(pin)
-            with tx(self.conn):
-                self.conn.execute("UPDATE people SET pin_hash = ?, failed_pin_attempts = 0 WHERE person_id = ?", (h, person["person_id"]))
-                enqueue(self.conn, "person", {"person_id": person["person_id"], "pin_hash": h})
-            return
-        self._refuse_if_locked(person)
-        if pins.check(person["pin_hash"], pin):
-            self.conn.execute("UPDATE people SET failed_pin_attempts = 0, locked_until = NULL WHERE person_id = ?", (person["person_id"],))
-            return
-        tries = person["failed_pin_attempts"] + 1
-        if tries < pins.MAX_TRIES:
-            self.conn.execute("UPDATE people SET failed_pin_attempts = ? WHERE person_id = ?", (tries, person["person_id"]))
-            left = pins.MAX_TRIES - tries
-            raise Rejected(f"Wrong PIN. {left} {'try' if left == 1 else 'tries'} left.")
-        until = (self.wall() + pins.LOCK_FOR).isoformat(timespec="seconds")
+    def _wrong_pin(self):
+        self.pin_fails += 1
+        if self.pin_fails < pins.MAX_TRIES:
+            raise Rejected("PIN not recognized. Try again, or ask an instructor.")
+        self.pin_fails = 0
+        self.pad_locked_until = self.wall() + pins.LOCK_FOR
+        until = self.pad_locked_until.isoformat(timespec="seconds")
         with tx(self.conn):
-            self.conn.execute("UPDATE people SET failed_pin_attempts = 0, locked_until = ? WHERE person_id = ?", (until, person["person_id"]))
-            self._open_alert("id_locked", person_id=person["person_id"],
-                             details=f"{pins.MAX_TRIES} wrong PINs for {person['name']}'s ID; locked until {until}")
-        raise Locked("Too many wrong PINs. This ID is locked for 15 minutes.", until=until)
-
-    def _refuse_if_locked(self, person) -> None:
-        until = pins.locked_until(person, self.wall())
-        if until:
-            raise Locked("This ID is locked for a few minutes after too many wrong PINs.", until=until.isoformat(timespec="seconds"))
+            self._open_alert("id_locked", details=f"{pins.MAX_TRIES} wrong PINs in a row at the kiosk; keypad locked until {until}")
+        raise Locked("Too many wrong PINs. Wait a minute and try again.", until=until)
 
     # -- scanning tools -----------------------------------------------------
 
     def scan(self, code: str, by_asset: bool = False, override_by: dict | None = None) -> dict:
         s = self._current()
-        col = "asset_id" if by_asset else "qr_code"
-        tool = self.conn.execute(f"SELECT * FROM tool_state WHERE {col} = ?", (code.strip(),)).fetchone()
+        where = "asset_id = ?" if by_asset else "(qr_code = ? OR nfc_uid = ?1)"
+        tool = self.conn.execute(f"SELECT * FROM tool_state WHERE {where}", (code.strip(),)).fetchone()
         if not tool:
             kit = None if by_asset else self.conn.execute("SELECT * FROM kits WHERE case_code = ?", (code.strip(),)).fetchone()
             if kit:
                 return self._scan_kit(s, kit)
-            if self.conn.execute("SELECT 1 FROM people WHERE id_code = ?", (code.strip(),)).fetchone():
-                raise Rejected("That's an ID card. Scan a tool label.")
             raise Rejected("Unknown code. Ask an instructor for help." if not by_asset else f"No tool has asset number {code}")
         if any(i["asset_id"] == tool["asset_id"] for i in s.items):
             raise Rejected(f"{tool['name']} is already in your list")
@@ -228,6 +194,8 @@ class Kiosk:
             result["battery_needed"] = self._battery_options(tool["battery_group_id"])
         if kit_id:
             s.kits[kit_id]["got"].add(tool["asset_id"])
+        if s.action == "out":
+            item["photo"] = self._take_photo()  # who took it, the moment it's tapped (Done fills any gaps)
         s.items.append(item)
         s.last_activity = self.clock()  # each scan resets the countdown
         return result
@@ -310,8 +278,9 @@ class Kiosk:
                                  "got": set(), "confirmed": s.action == "out"}
         s.last_activity = self.clock()
         if s.action == "out" and kit["check_mode"] == "standard":
+            photo = self._take_photo()
             for p in ready:  # standard mode: the case covers every piece in it
-                self._add_kit_piece(s, kit["kit_id"], p)
+                self._add_kit_piece(s, kit["kit_id"], p, photo)
         out = {"kit_id": kit["kit_id"], "name": kit["name"], "mode": kit["check_mode"],
                "pieces": [{"asset_id": p["asset_id"], "name": p["name"]} for p in ready]}
         if skipped:
@@ -322,8 +291,10 @@ class Kiosk:
             out["confirm"] = "Scan each piece in the kit"
         return out
 
-    def _add_kit_piece(self, s: Session, kit_id: str, p) -> None:
+    def _add_kit_piece(self, s: Session, kit_id: str, p, photo: str | None = None) -> None:
         item = {"asset_id": p["asset_id"], "name": p["name"], "spot_id": p["spot_id"], "kit_id": kit_id}
+        if photo:
+            item["photo"] = photo
         if p["needs_battery"] and not self._is_kit_with_battery(s, p):
             item.update(needs_battery=p["battery_group_id"], battery=None)
         s.items.append(item)
@@ -349,14 +320,12 @@ class Kiosk:
     # -- saving -------------------------------------------------------------
 
     def finish(self, force: bool = False) -> dict:
-        """Save the session: one transaction per tool, one gate photo shared by all of them (K3, K4).
+        """Save the session: one transaction per tool (K3). Checkouts carry the photo taken as each tool was tapped;
+        returns, and any tool whose photo failed, share one photo taken now (K4).
         force (idle timeout): save what was scanned even if a battery or a kit check is unfinished."""
         s = self.session
-        if not s or s.pin != "ok":
-            self.session = None
-            if s:
-                return {"session_id": s.id, "action": s.action, "items": []}
-            raise Rejected("Scan your ID to start")
+        if not s:
+            raise Rejected("Enter your PIN to start")
         if not force:
             waiting = [i["name"] for i in s.items if i.get("needs_battery") and not i.get("battery")]
             if waiting:
@@ -370,18 +339,19 @@ class Kiosk:
         if not s.items:
             return {"session_id": s.id, "action": s.action, "items": []}
 
-        photo = self._take_photo()
+        photo = self._take_photo() if any(not i.get("photo") for i in s.items) else None
         now = self.wall()
         ts = now.isoformat(timespec="seconds")
         due = loans.due_at(self.conn, now).isoformat(timespec="seconds") if s.action == "out" else None
         batteries = {i["asset_id"]: i["battery"] for i in s.items if i.get("battery")}
         with tx(self.conn):
-            if photo:
-                enqueue(self.conn, "photo", {"path": photo, "session_id": s.id, "ts": ts})
+            for p in dict.fromkeys([photo] + [i.get("photo") for i in s.items]):
+                if p:
+                    enqueue(self.conn, "photo", {"path": p, "session_id": s.id, "ts": ts})
             for item in s.items:
                 txn = {
                     "txn_id": uuid.uuid4().hex, "ts": ts, "asset_id": item["asset_id"], "person_id": s.person["person_id"],
-                    "action": s.action, "session_id": s.id, "gate_photo": photo,
+                    "action": s.action, "session_id": s.id, "gate_photo": item.get("photo") or photo,
                     "override_by": item.get("override_by") or (s.override_by or {}).get("person_id"),
                     "kiosk_id": self.kiosk_id, "paired_battery_id": batteries.get(item["asset_id"]),
                     "kit_id": item.get("kit_id"), "due_at": due,
@@ -398,7 +368,8 @@ class Kiosk:
             for i in items:
                 spot = i["spot_id"] and self.conn.execute("SELECT label FROM spots WHERE spot_id = ?", (i["spot_id"],)).fetchone()
                 i["return_to"] = spot["label"] if spot else None
-        out = {"session_id": s.id, "action": s.action, "person": s.person["name"], "items": items, "photo": photo}
+        out = {"session_id": s.id, "action": s.action, "person": s.person["name"], "items": items,
+               "photo": photo or next((i["photo"] for i in items if i.get("photo")), None)}
         if due:
             out["due_at"] = due
         if short:
@@ -439,7 +410,7 @@ class Kiosk:
         return tool
 
     def _reporter(self) -> str | None:
-        who = (self.session.person if self.session and self.session.pin == "ok" else None) or self.instructor
+        who = (self.session and self.session.person) or self.instructor
         return who and who["person_id"]
 
     def report_damage(self, ref: str, severity: str, tags: list[str] | None = None, notes: str = "", photo: bool = True) -> dict:
@@ -516,30 +487,20 @@ class Kiosk:
 
     # -- instructor mode (K7, K14, K16, K17) ---------------------------------------
 
-    def begin_instructor(self, id_code: str) -> dict:
-        person = self.conn.execute(
-            f"SELECT * FROM people WHERE id_code = ? AND active = 1 AND role IN {STAFF}", (id_code.strip(),)).fetchone()
-        if not person:
-            raise Rejected("Instructors only")
-        self._refuse_if_locked(person)
-        self.pending_instructor = person
-        self.instructor_seen = self.clock()  # else the idle check logs the badge out before the PIN is typed
-        return {"instructor_pin": "setup" if not person["pin_hash"] else "check", "name": person["name"]}
-
     def _staff(self) -> dict:
         if not self.instructor:
-            raise Rejected("Instructor: scan your badge and enter your PIN first")
+            raise Rejected("Instructor: tap Instructor and enter your PIN first")
         self.instructor_seen = self.clock()
         return self.instructor
 
     def logout_instructor(self) -> None:
-        self.instructor = self.pending_instructor = self.enroll_for = None
+        self.instructor = self.link_for = None
 
     def start_for(self, person_id: str, action: str) -> dict:
-        """K7: a student whose ID won't scan. The session is theirs; every record names the instructor."""
+        """K7: a student who forgot their PIN. The session is theirs; every record names the instructor."""
         inst = self._staff()
         s = self.start(None, action, person_id=person_id, override_by=inst)
-        self._audit(inst, "Transactions", s.id, "person_id", None, person_id, "ID would not scan; instructor started the session")
+        self._audit(inst, "Transactions", s.id, "person_id", None, person_id, "Student without their PIN; instructor started the session")
         return self._started(s)
 
     def add_by_asset(self, asset_id: str) -> dict:
@@ -549,27 +510,38 @@ class Kiosk:
         self._audit(inst, "Transactions", self.session.id, "asset_id", None, item["asset_id"], "Label would not scan; entered by hand")
         return item
 
-    def enroll(self, person_id: str, code: str | None = None) -> dict:
-        """K17: pick a person, scan their new card. With no code yet, the next scan is the card."""
+    def assign_pin(self, person_id: str) -> dict:
+        """Give a person a new random PIN (4 digits for students, 6 for staff), shown once on screen.
+        Also how a forgotten PIN is replaced: the old one stops working."""
         inst = self._staff()
         person = self.conn.execute("SELECT * FROM people WHERE person_id = ?", (person_id,)).fetchone()
         if not person:
             raise Rejected("Pick a person first")
-        if not code:
-            self.enroll_for = dict(person)
-            return {"enroll": person["name"], "waiting": True}
-        code = code.strip()
-        self.enroll_for = None
-        clash = self.conn.execute("SELECT name FROM people WHERE id_code = ? AND person_id != ?", (code, person_id)).fetchone()
-        if clash:
-            raise Rejected(f"That card already belongs to {clash['name']}")
-        if self.conn.execute("SELECT 1 FROM tools WHERE qr_code = ? UNION SELECT 1 FROM kits WHERE case_code = ?", (code, code)).fetchone():
-            raise Rejected("That's a tool label, not a card")
+        pin, h = pins.new_pin(self.conn, person["role"])
         with tx(self.conn):
-            self.conn.execute("UPDATE people SET id_code = ? WHERE person_id = ?", (code, person_id))
-            enqueue(self.conn, "person", {"person_id": person_id, "id_code": code})
-            self._audit(inst, "People", person_id, "id_code", person["id_code"], code, "New badge enrolled at the kiosk", in_tx=True)
-        return {"enroll": person["name"], "id_code": code}
+            self.conn.execute("UPDATE people SET pin_hash = ? WHERE person_id = ?", (h, person_id))
+            enqueue(self.conn, "person", {"person_id": person_id, "pin_hash": h})
+            self._audit(inst, "People", person_id, "pin_hash", None, None, "New PIN given at the kiosk", in_tx=True)
+        return {"name": person["name"], "pin": pin}
+
+    def link_tag(self, asset_id: str, uid: str | None = None) -> dict:
+        """Pick a tool, then tap its new NFC sticker. With no uid yet, the next sticker tapped is the one."""
+        inst = self._staff()
+        tool = self._tool(asset_id)
+        if not uid:
+            self.link_for = dict(tool)
+            return {"link": tool["name"], "waiting": True}
+        uid = uid.strip()
+        self.link_for = None
+        clash = self.conn.execute("SELECT name FROM tools WHERE (nfc_uid = ? OR qr_code = ?) AND asset_id != ?",
+                                  (uid, uid, tool["asset_id"])).fetchone()
+        if clash:
+            raise Rejected(f"That sticker already belongs to {clash['name']}")
+        with tx(self.conn):
+            self.conn.execute("UPDATE tools SET nfc_uid = ? WHERE asset_id = ?", (uid, tool["asset_id"]))
+            enqueue(self.conn, "tool", {"asset_id": tool["asset_id"], "nfc_uid": uid})
+            self._audit(inst, "Tools", tool["asset_id"], "nfc_uid", tool["nfc_uid"], uid, "NFC sticker linked at the kiosk", in_tx=True)
+        return {"link": tool["name"], "nfc_uid": uid}
 
     def extend(self, asset_id: str, due: str, reason: str = "") -> dict:
         """K16: an instructor moves a loan's due time to a set date."""
@@ -659,7 +631,7 @@ class Kiosk:
     def expire_idle(self) -> dict | None:
         """Call about once a second. A walked-away session is saved, not dropped: the tools left with them.
         An instructor who walks away is logged out."""
-        if (self.instructor or self.pending_instructor) and self.clock() - self.instructor_seen > self.idle_timeout * 2:
+        if self.instructor and self.clock() - self.instructor_seen > self.idle_timeout * 2:
             self.logout_instructor()
         left = self.seconds_left()
         if left is None or left > 0:
@@ -670,9 +642,7 @@ class Kiosk:
 
     def _current(self) -> Session:
         if not self.session:
-            raise Rejected("Scan your ID to start")
-        if self.session.pin != "ok":
-            raise Rejected("Choose your 4-digit PIN first" if self.session.pin == "setup" else "Enter your PIN first")
+            raise Rejected("Enter your PIN to start")
         return self.session
 
     def _take_photo(self) -> str | None:
@@ -689,8 +659,7 @@ class Kiosk:
         return {
             "next_action": self.next_action,
             "instructor": self.instructor and self.instructor["name"],
-            "instructor_pin": bool(self.pending_instructor),
-            "enroll_for": self.enroll_for and self.enroll_for["name"],
+            "link_for": self.link_for and self.link_for["name"],
         }
 
 

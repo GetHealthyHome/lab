@@ -6,6 +6,7 @@ import pytest
 
 from lab_toolbox import sync
 from lab_toolbox.google import GoogleError, GoogleSink
+from lab_toolbox import pins
 from lab_toolbox.sessions import Kiosk
 
 
@@ -277,8 +278,8 @@ def test_tool_photo_stays_on_pi_and_survives_a_pull(conn, tmp_path, clock):
     conn.execute("INSERT INTO people (person_id, id_code, name, role) VALUES ('P-9', 'ID-9', 'Ms. Rivera', 'instructor')")
     k = Kiosk(conn, "gate-1", camera=Cam(tmp_path / "drill.jpg"), clock=clock)
     k.next_action = "instructor"
-    k.handle("ID-9")
-    k.enter_pin("9999")
+    conn.execute("UPDATE people SET pin_hash = ? WHERE person_id = 'P-9'", (pins.hash_pin("999999"),))
+    k.login("999999")
     assert k.take_tool_photo("HHA-0001")["name"] == "Digital multimeter"
 
     g = FakeGoogle({"Tools": [["asset_id", "qr_code", "name", "spot_id"],
