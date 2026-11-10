@@ -5,7 +5,9 @@ Run: KIOSK_DB=kiosk.db uvicorn lab_toolbox.app:app
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,12 +17,13 @@ from pydantic import BaseModel
 
 from . import db, sync
 from .db import now_iso, setting
-from .hardware import Buzzer
+from .hardware import Backlight, Buzzer
 from .reader import Watcher
 from . import loans
 from .sessions import Kiosk, Rejected, kits_view
 
 log = logging.getLogger(__name__)
+DIM_AFTER_SECONDS = 300  # after closing time the screen dims once nobody has touched or scanned for this long
 STATIC = Path(__file__).parent / "static"
 
 
@@ -89,7 +92,8 @@ class ClearBody(BaseModel):
     note: str
 
 
-def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = None) -> FastAPI:
+def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = None,
+               backlight: Backlight | None = None) -> FastAPI:
     """camera: anything with frame() and capture() (see hardware.PiGateCamera). With one, the app reads codes itself."""
 
     @asynccontextmanager
@@ -111,6 +115,8 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
         except Exception:
             log.exception("buzzer not available; running silent")
             app.state.buzzer = Buzzer(None)
+        app.state.backlight = backlight or Backlight()
+        app.state.last_touch = time.monotonic()
         app.state.last_saved = None
         app.state.last_event = None
         tasks = [asyncio.create_task(_idle_loop(app))]
@@ -131,6 +137,12 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
 
     def k(request: Request) -> Kiosk:
         return request.app.state.kiosk
+
+    @app.post("/api/wake")
+    async def wake(request: Request):
+        """The screen calls this on every touch, so a dimmed screen brightens."""
+        request.app.state.last_touch = time.monotonic()
+        return {}
 
     @app.get("/")
     async def screen():
@@ -312,6 +324,7 @@ def handle_code(app: FastAPI, code: str) -> dict:
 
 def sounded(app: FastAPI, act) -> dict:
     """Run one kiosk action with the PRD's feedback: a sound plus an event (`kind` picks the look)."""
+    app.state.last_touch = time.monotonic()  # a code held up to the camera wakes a dimmed screen too
     seq = (app.state.last_event or {"seq": 0})["seq"] + 1
     try:
         result = act()
@@ -373,6 +386,17 @@ async def _idle_loop(app: FastAPI):
             app.state.last_saved = saved
             if saved["items"]:
                 app.state.buzzer.play("saved")
+        try:
+            dim_tick(app, datetime.now(timezone.utc), time.monotonic())
+        except Exception:  # dimming is a nicety: it must never stop the idle timer above
+            log.exception("screen dimming failed")
+
+
+def dim_tick(app: FastAPI, now: datetime, mono: float) -> None:
+    """Issue #29: dim after closing time when nobody is using the kiosk; any touch or scan brightens it again."""
+    kiosk = app.state.kiosk
+    busy = kiosk.session is not None or mono - app.state.last_touch < DIM_AFTER_SECONDS
+    app.state.backlight.dim(not busy and loans.closed(kiosk.conn, now))
 
 
 app = create_app()

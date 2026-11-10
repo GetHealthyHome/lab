@@ -86,6 +86,7 @@ say "Services"
 systemctl set-default multi-user.target # no desktop, if the card has one: the kiosk screen is the only display
 install -m644 "$DEPLOY"/*.service "$DEPLOY"/*.timer /etc/systemd/system/
 install -m644 "$DEPLOY/pam-lab-toolbox-screen" /etc/pam.d/lab-toolbox-screen
+install -m644 "$DEPLOY/99-lab-toolbox-backlight.rules" /etc/udev/rules.d/99-lab-toolbox-backlight.rules
 mkdir -p /etc/chromium/policies/managed
 install -m644 "$DEPLOY/chromium-policy.json" /etc/chromium/policies/managed/lab-toolbox.json
 systemctl daemon-reload

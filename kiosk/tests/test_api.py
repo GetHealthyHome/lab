@@ -44,3 +44,43 @@ def test_starts_without_gate_camera_or_buzzer(conn, clock, monkeypatch):
     monkeypatch.setenv("BUZZER_PIN", "18")
     with TestClient(create_app(Kiosk(conn, "gate-1", clock=clock))) as c:
         assert c.get("/api/health").status_code == 200
+
+
+def test_screen_dims_after_closing_until_someone_touches_it(conn, clock, tmp_path):
+    from datetime import datetime
+
+    from lab_toolbox import loans
+    from lab_toolbox.app import DIM_AFTER_SECONDS, dim_tick
+    from lab_toolbox.hardware import Backlight
+
+    night, day = datetime(2026, 1, 5, 23, 0).astimezone(), datetime(2026, 1, 5, 12, 0).astimezone()
+    assert loans.closed(conn, night) and not loans.closed(conn, day)
+    assert loans.closed(conn, datetime(2026, 1, 5, 6, 59).astimezone())
+    assert not loans.closed(conn, datetime(2026, 1, 5, 7, 0).astimezone())
+    conn.execute("INSERT INTO settings VALUES ('lab_open', '08:00'), ('lab_close', '01:00')")  # open past midnight
+    assert not loans.closed(conn, datetime(2026, 1, 5, 0, 30).astimezone())
+    assert loans.closed(conn, datetime(2026, 1, 5, 3, 0).astimezone())
+    conn.execute("UPDATE settings SET value = 'late' WHERE key = 'lab_close'")  # mistyped: back to 21:00
+    assert loans.closed(conn, night) and not loans.closed(conn, day)
+
+    panel = tmp_path / "10-0045"
+    panel.mkdir()
+    (panel / "max_brightness").write_text("255")
+    (panel / "brightness").write_text("25")  # left dim by a restart in the night
+    level = lambda: (panel / "brightness").read_text()
+    app = create_app(Kiosk(conn, "gate-1", clock=clock), backlight=Backlight(str(tmp_path)))
+    with TestClient(app) as c:
+        t0 = app.state.last_touch
+        dim_tick(app, night, t0 + DIM_AFTER_SECONDS - 1)
+        assert level() == "255"  # someone was here a moment ago (and the first tick always sets the level)
+        dim_tick(app, day, t0 + DIM_AFTER_SECONDS)
+        assert level() == "255"  # never during opening hours
+        dim_tick(app, night, t0 + DIM_AFTER_SECONDS)
+        assert level() == "25"
+        c.post("/api/wake")  # a touch
+        dim_tick(app, night, app.state.last_touch + 1)
+        assert level() == "255"
+        c.post("/api/session", json={"id_code": "ID-1001", "action": "out"})
+        dim_tick(app, night, app.state.last_touch + DIM_AFTER_SECONDS)
+        assert level() == "255"  # a session in progress keeps it bright
+    Backlight(str(tmp_path / "none")).dim(True)  # a screen with no backlight file: nothing to do, no error

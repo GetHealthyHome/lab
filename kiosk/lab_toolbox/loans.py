@@ -9,6 +9,7 @@ from .db import flag, setting
 
 DEFAULT_LOAN_HOURS = 4.0      # PRD open question; set loan_hours in the Settings tab
 DEFAULT_LAB_CLOSE = "21:00"   # kiosk local time
+DEFAULT_LAB_OPEN = "07:00"    # only used to end the night for the screen dimmer
 DEFAULT_GRACE_MINUTES = 15.0
 
 
@@ -32,6 +33,24 @@ def due_at(conn, now: datetime) -> datetime:
     # After closing time (a late night) the loan length alone applies.
     due = min(loan_end, close) if close and close > local else loan_end
     return due.astimezone(timezone.utc)
+
+
+def _minutes(conn, key: str, default: str) -> int:
+    """A Settings clock time such as 21:00 as minutes after midnight; the default if it's mistyped."""
+    for v in (setting(conn, key, default), default):
+        try:
+            h, m = (int(x) for x in v.split(":"))
+            return h * 60 + m
+        except ValueError:
+            pass
+
+
+def closed(conn, now: datetime) -> bool:
+    """True from lab_close until lab_open, kiosk local time: the hours when the screen may dim."""
+    local = now.astimezone()
+    t = local.hour * 60 + local.minute
+    open_, close = _minutes(conn, "lab_open", DEFAULT_LAB_OPEN), _minutes(conn, "lab_close", DEFAULT_LAB_CLOSE)
+    return not open_ <= t < close if open_ < close else close <= t < open_  # second case: a lab open past midnight
 
 
 def grace(conn) -> timedelta:

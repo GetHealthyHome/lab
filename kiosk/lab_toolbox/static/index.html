@@ -449,6 +449,7 @@ document.addEventListener("click", e => {
   if (b && !b.disabled) acts[b.dataset.act]?.(b.dataset.arg);
 });
 document.addEventListener("contextmenu", e => e.preventDefault());  // long-press menus
+document.addEventListener("pointerdown", () => { fetch("/api/wake", {method: "POST"}).catch(() => {}); });  // brightens a dimmed screen
 poll(); setInterval(poll, 1000);
 loadPhotos(); setInterval(loadPhotos, 60000);  // photos synced down from the Sheet show up within a minute
 </script>

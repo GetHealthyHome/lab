@@ -86,6 +86,26 @@ class UsbCageCamera:
         return path
 
 
+class Backlight:
+    """The touchscreen's backlight: a brightness file under /sys/class/backlight (official Pi display).
+    A screen without one, such as most HDMI panels, is left alone."""
+
+    def __init__(self, root: str = "/sys/class/backlight"):
+        self.dirs = sorted(Path(root).glob("*"))
+        self.dimmed = None  # unknown: a restart during the night may find the screen already dim
+
+    def dim(self, on: bool) -> None:
+        if on == self.dimmed:
+            return
+        self.dimmed = on
+        for d in self.dirs:
+            try:
+                full = int((d / "max_brightness").read_text())
+                (d / "brightness").write_text(str(max(1, full // 10) if on else full))
+            except (OSError, ValueError):  # no permission (udev rule missing): never take the kiosk down over it
+                log.warning("cannot set the backlight at %s", d, exc_info=True)
+
+
 # (frequency Hz, seconds); 0 Hz is a gap. PRD feedback table.
 SOUNDS = {
     "accepted": [(2000, 0.08)],                                   # short high beep
