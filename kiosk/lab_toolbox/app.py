@@ -101,9 +101,16 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
         if cam is None and os.environ.get("GATE_CAMERA") == "pi":
             from .hardware import PiGateCamera
 
-            cam = PiGateCamera(os.environ.get("PHOTO_DIR", "photos"))
+            try:
+                cam = PiGateCamera(os.environ.get("PHOTO_DIR", "photos"))
+            except Exception:  # unplugged or loose ribbon: keep the screen and dashboard sync working without it
+                log.exception("gate camera not available; running without it")
         pin = os.environ.get("BUZZER_PIN")
-        app.state.buzzer = buzzer or Buzzer(int(pin) if pin else None)
+        try:
+            app.state.buzzer = buzzer or Buzzer(int(pin) if pin else None)
+        except Exception:
+            log.exception("buzzer not available; running silent")
+            app.state.buzzer = Buzzer(None)
         app.state.last_saved = None
         app.state.last_event = None
         tasks = [asyncio.create_task(_idle_loop(app))]
