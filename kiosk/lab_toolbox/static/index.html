@@ -117,14 +117,14 @@ const time = iso => { const d = new Date(iso), today = d.toDateString() === new 
 const where = label => label ? label.toUpperCase().replace(/\s*,\s*/g, " — ") : "ASK AN INSTRUCTOR";
 const KEYS = "1234567890QWERTYUIOPASDFGHJKL-ZXCVBNM".split("");
 const TAGS = ["Cracked", "Broken part", "Won't power on", "Frayed cord", "Missing piece", "Dull or worn", "Leaking", "Bent"];
-const PIN_LEN = 4;  // the PIN/NFC work makes this 4 for students and 6 for staff
+const PIN_LEN = 6;  // students have 4 digits and tap ✓; staff have 6, which sends it straight away
 const NOTES = ["Inspected, no damage", "Repaired", "Damage is cosmetic only"];
 
 let photos = {};  // asset_id -> version, for tools with a photo on this Pi
 const thumb = (id, style = "") => photos[id] ? `<img class="thumb" style="${style}" src="/api/tools/${encodeURIComponent(id)}/photo?v=${photos[id]}" alt="">` : "";
 const loadPhotos = () => call("GET", "/api/photos").then(p => { photos = p; render(); }).catch(() => {});
 let st = null, lastSeq = null, lastHtml = "", flashTimer, lastTap = Date.now(), logo = "/static/lab-logo.png";
-const ui = { pin: "", msg: null, summary: null, locked: null, report: null, inst: null, seenSaved: undefined, cancelArm: 0 };
+const ui = { pin: "", pad: null, msg: null, summary: null, locked: null, report: null, inst: null, seenSaved: undefined, cancelArm: 0 };
 // A logo.png dropped on the Pi (/data/logo.png) wins over the logo shipped in the repo.
 const probe = new Image(); probe.onload = () => { logo = probe.src; lastHtml = ""; render(); }; probe.src = "/static/logo.png";
 
@@ -149,7 +149,7 @@ async function poll() {
   const saved = st.auto_saved;  // the 45 s timer saved a walked-away session: still show its summary
   if (ui.seenSaved === undefined) ui.seenSaved = saved?.session_id ?? null;
   else if (saved && saved.session_id !== ui.seenSaved) { ui.seenSaved = saved.session_id; if (saved.items.length) showSummary(saved); }
-  if (st.session) { ui.summary = null; if (st.session.pin === "ok") ui.locked = null; }
+  if (st.session) { ui.summary = null; ui.locked = null; }
   if (!st.session && !st.instructor) ui.inst = null;
   render(); tick();
 }
@@ -184,8 +184,8 @@ function view() {
   const s = st?.session;
   if (ui.locked) return lockedView();
   if (ui.summary) return summaryView();
-  if (st?.instructor_pin) return pinView("Instructor PIN", "Instructor: enter your 4-digit PIN");
-  if (s && s.pin !== "ok") return pinView(`Hi, ${s.person}`, s.pin === "setup" ? "Choose a 4-digit PIN. You'll use it every time." : "Enter your 4-digit PIN");
+  if (ui.pad === "instructor") return pinView("Instructor PIN", "Instructor: enter your 6-digit PIN");
+  if (ui.pad && !s) return pinView(ui.pad === "in" ? "Return" : "Check out", "Enter your PIN, then tap ✓");
   if (ui.report) return reportView(s);
   if (ui.inst && st?.instructor) return instPage();
   if (s) return sessionView(s);
@@ -196,29 +196,27 @@ function view() {
 function idleView() {
   const next = st?.next_action || "out";
   const recent = ui.msg && Date.now() - ui.msg.at < 8000;
-  const prompt = next === "instructor" ? "Instructor: hold your badge up to the camera"
-    : next === "in" ? "Return: hold your ID up to the camera" : "Hold your ID up to the camera to check out";
   return [null, `<div class="idle">
     <div class="brand"><img src="${logo}" alt="Lab Toolbox"></div>
     <div class="col grow">
-      ${recent ? msgBar("") : `<div class="prompt">${esc(prompt)}</div>`}
-      ${next === "instructor" ? `<div class="card blue grow" style="display:flex;align-items:center;font-size:30px">Waiting for an instructor badge…</div>
-        <button class="sm" data-act="mode" data-arg="out">Back</button>` : `
+      ${recent ? msgBar("") : `<div class="prompt">Tap Check out or Return, then enter your PIN</div>`}
       <button class="mode blue ${next === "out" ? "on" : ""}" data-act="mode" data-arg="out">Check out</button>
       <button class="mode green ${next === "in" ? "on" : ""}" data-act="mode" data-arg="in">Return</button>
-      <div class="row"><button class="grow sm" data-act="report">⚠ Report a problem</button><button class="sm" data-act="mode" data-arg="instructor">Instructor</button></div>`}
+      <div class="row"><button class="grow sm" data-act="report">⚠ Report a problem</button><button class="sm" data-act="mode" data-arg="instructor">Instructor</button></div>
     </div></div>`];
 }
 
 function pinView(title, hint) {
-  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "Cancel"];
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "✓"];
+  const n = ui.pad === "instructor" ? 6 : Math.max(4, ui.pin.length);  // 4 dots, 6 once a staff PIN runs past 4
   return [title, `<div class="row grow">
     <div class="col grow" style="justify-content:center;gap:22px">
       ${msgBar(hint)}
-      <div class="dots">${[...Array(PIN_LEN).keys()].map(i => `<b class="${i < ui.pin.length ? "f" : ""}"></b>`).join("")}</div>
+      <div class="dots">${[...Array(n).keys()].map(i => `<b class="${i < ui.pin.length ? "f" : ""}"></b>`).join("")}</div>
       <p class="muted small">Hide the keypad with your other hand. Ask an instructor if you forgot your PIN.</p>
+      <button class="sm red" style="align-self:flex-start;min-width:160px" data-act="pin" data-arg="Cancel">Cancel</button>
     </div>
-    <div class="pad">${keys.map(k => `<button class="${k === "Cancel" ? "red" : ""}" style="${k === "Cancel" ? "font-size:19px" : ""}" aria-label="${k === "⌫" ? "Delete" : k}" data-act="pin" data-arg="${k}">${k}</button>`).join("")}</div>
+    <div class="pad">${keys.map(k => `<button class="${k === "✓" ? "green" : ""}" aria-label="${k === "⌫" ? "Delete" : k === "✓" ? "Enter" : k}" data-act="pin" data-arg="${k}">${k}</button>`).join("")}</div>
   </div>`];
 }
 
@@ -243,7 +241,7 @@ function sessionView(s) {
   const title = `${out ? "Checking out" : "Returning"} · ${s.person}${s.started_by ? ` (started by ${s.started_by})` : ""}`;
   return [title, `<div class="row grow">
     <div class="col grow">
-      ${msgBar(out ? "Hold each tool's label up to the camera" : "Hold each tool you're returning up to the camera")}
+      ${msgBar(st.qr ? "Hold the tool's QR label up to the camera" : out ? "Tap each tool's sticker on the reader" : "Tap each tool you're returning on the reader")}
       <div class="col grow scroll">${cards.join("")}
         <ul class="items">${items.length ? items.map(i => `<li>${thumb(i.asset_id)}<div class="grow"><div class="n">${esc(i.name)}</div>
           <div class="d">${esc(i.asset_id)}${i.kit_id ? " · kit" : ""}${i.battery ? " · battery " + esc(i.battery) : ""}${i.needs_battery && !i.battery ? " · <span style='color:var(--amber)'>needs a battery</span>" : ""}</div></div>
@@ -253,7 +251,8 @@ function sessionView(s) {
     <div class="col side">
       <button class="done green" data-act="done">Done ✓<div class="small">${s.items.length} tool${s.items.length === 1 ? "" : "s"}</div></button>
       ${st.instructor ? `<button class="sm blue" data-act="asset">Type asset #</button>` : ""}
-      <button class="sm" data-act="report">⚠ Report a problem</button>
+      ${st.qr ? "" : `<button class="sm" data-act="qr">Scan QR code instead</button>`}
+      <div class="row"><button class="sm grow" data-act="report">⚠ Report</button>${st.instructor ? "" : `<button class="sm" data-act="mode" data-arg="instructor">Instructor</button>`}</div>
       <button class="sm ${ui.cancelArm > Date.now() ? "red" : ""}" data-act="cancel">${ui.cancelArm > Date.now() ? "Tap again to cancel" : "Cancel"}</button>
     </div></div>
     <div class="bar"><div id="fill"></div><span id="secs"></span></div>`];
@@ -275,7 +274,7 @@ function summaryView() {
 }
 
 function lockedView() {
-  return [null, `<div class="lock"><div class="badge" style="background:var(--red);color:#fff;box-shadow:0 0 0 10px color-mix(in srgb, var(--red) 25%, transparent)">✕</div><h1>ID locked</h1><div>${esc(ui.locked.text)}</div>
+  return [null, `<div class="lock"><div class="badge" style="background:var(--red);color:#fff;box-shadow:0 0 0 10px color-mix(in srgb, var(--red) 25%, transparent)">✕</div><h1>Keypad locked</h1><div>${esc(ui.locked.text)}</div>
     <div class="big" id="lockleft"></div><div class="small">Ask an instructor if you need a tool now.</div>
     <button class="sm" style="min-width:200px" data-act="closelock">OK</button></div>`];
 }
@@ -308,24 +307,27 @@ function reportView(s) {
 
 // Instructor mode (K7, K14, K16, K17)
 function instHome() {
-  return [`Instructor · ${st.instructor}`, `${msgBar("Scan a student's ID to help them, or pick a job")}
-    <div class="row grow"><button class="grow blue" data-act="ipage" data-arg="start">Start for a student<div class="small">ID won't scan</div></button>
-      <button class="grow" data-act="ipage" data-arg="enroll">Link a new badge</button>
-      <button class="grow" data-act="ipage" data-arg="photo">📷 Take tool photos</button></div>
+  return [`Instructor · ${st.instructor}`, `${msgBar("Pick a job")}
+    <div class="row grow"><button class="grow blue" data-act="ipage" data-arg="start">Start for a student<div class="small">Forgot their PIN</div></button>
+      <button class="grow" data-act="ipage" data-arg="givepin">Give a PIN</button>
+      <button class="grow" data-act="ipage" data-arg="photo">📷 Tool photos &amp; NFC stickers</button></div>
     <div class="row grow"><button class="grow" data-act="ipage" data-arg="loans">Loans &amp; due times</button>
       <button class="grow amber" data-act="ipage" data-arg="quarantine">Release a locked tool</button>
       <button class="grow red" data-act="logout">Log out</button></div>
-    ${st.enroll_for ? `<div class="card blue">Hold ${esc(st.enroll_for)}'s new card up to the camera now.</div>` : ""}`];
+    ${st.link_for ? `<div class="card blue">Tap the new sticker on the ${esc(st.link_for)} on the reader now.</div>` : ""}`];
 }
 
 function instPage() {
   const p = ui.inst, back = `<button class="sm" data-act="iback">‹ Back</button>`;
   if (p.page === "asset") return ["Type the engraved asset number", picker(back, "Asset number, like HHA-0001", null, null,
     `<button class="sm green" data-act="iasset">Add</button>`)];
-  if (p.page === "start" || p.page === "enroll") {
+  if (p.page === "givepin" && p.given) return [`New PIN · ${p.given.name}`, `<div class="row">${back}</div>
+    <div class="col grow" style="justify-content:center;align-items:center;gap:16px"><div class="big mono" style="font-size:72px;letter-spacing:.2em">${esc(p.given.pin)}</div>
+    <div>Show ${esc(p.given.name)} this PIN now. It won't be shown again, and their old PIN no longer works.</div></div>`];
+  if (p.page === "start" || p.page === "givepin") {
     if (p.person) return [`Start for ${p.person.name}`, `<div class="row">${back}</div>
       <div class="row grow"><button class="grow blue" data-act="istart" data-arg="out">Check out</button><button class="grow green" data-act="istart" data-arg="in">Return</button></div>`];
-    return [p.page === "start" ? "Start for which student?" : "Link a badge for who?", picker(back, "Type a name", p.results,
+    return [p.page === "start" ? "Start for which student?" : "New PIN for who?", picker(back, "Type a name", p.results,
       x => `<button class="grow list-btn sm" data-act="iperson" data-arg="${esc(x.person_id)}"><span>${esc(x.name)}</span><span class="small muted">${esc(x.role)}</span></button>`)];
   }
   if (p.page === "loans") return ["Loans", `<div class="row">${back}<div class="grow" style="align-self:center">${msgBar("Tap to move a due time")}</div></div>
@@ -339,8 +341,9 @@ function instPage() {
       return [`Photo · ${p.tool.name}`, `<div class="row">${back}</div><div class="row grow" style="align-items:center;gap:20px">
         ${has ? thumb(id, "width:220px;height:220px") : `<div class="card blue" style="width:220px;height:220px;display:flex;align-items:center;justify-content:center;text-align:center">No photo yet</div>`}
         <div class="col grow"><h2>Hold the ${esc(p.tool.name)} in front of the camera, label side out, against a plain background.</h2>
-        <button class="green" data-act="isnap">📷 ${has ? "Retake photo" : "Take photo"}</button></div></div>`]; }
-    return ["Photo for which tool?", picker(back, "Type the tool's name or number", p.results,
+        <button class="green" data-act="isnap">📷 ${has ? "Retake photo" : "Take photo"}</button>
+        <button class="blue" data-act="ilink">Link NFC sticker</button></div></div>`]; }
+    return ["Which tool?", picker(back, "Type the tool's name or number", p.results,
       t => `<button class="grow list-btn sm" data-act="iptool" data-arg="${esc(t.asset_id)}"><span>${esc(t.name)}</span><span class="small muted">${photos[t.asset_id] ? "✓ photo" : esc(t.asset_id)}</span></button>`)];
   }
   if (p.page === "quarantine") {
@@ -387,7 +390,7 @@ function tick() {
     $("lockleft").textContent = `${m}:${String(sec).padStart(2, "0")}`;
     if (Date.now() - ui.locked.at > 30000) { ui.locked = null; render(); }
   }
-  if ((ui.report || ui.inst) && Date.now() - lastTap > 60000) { ui.report = ui.inst = null; render(); }  // walked away mid-report
+  if ((ui.report || ui.inst || ui.pad) && Date.now() - lastTap > 60000) { ui.report = ui.inst = ui.pad = null; ui.pin = ""; render(); }  // walked away
 }
 function showSummary(r) {
   ui.summary = r; ui.msg = null; flash("ok");
@@ -401,19 +404,20 @@ async function search() {
   if (!p || p.page === "asset") return;
   const q = encodeURIComponent((p.q || "").trim());
   if (ui.report || p.page === "photo") p.results = await call("GET", `/api/tools?q=${q}`);
-  else if (p.page === "start" || p.page === "enroll") p.results = await call("GET", `/api/instructor/people?q=${q}`);
+  else if (p.page === "start" || p.page === "givepin") p.results = await call("GET", `/api/instructor/people?q=${q}`);
   else if (p.page === "loans") p.results = await call("GET", "/api/loans");
   else if (p.page === "quarantine") p.results = (await call("GET", "/api/tools")).filter(t => t.state === "quarantined");
   render();
 }
 const acts = {
-  mode: a => go(() => call("POST", "/api/mode", {action: a}).then(() => { ui.msg = null; })),
+  mode: a => go(() => call("POST", "/api/mode", {action: a}).then(() => { ui.msg = null; ui.pin = ""; ui.pad = a; })),
   pin: k => {
-    if (k === "Cancel") { ui.pin = ""; return go(() => st.instructor_pin ? call("POST", "/api/instructor/logout") : call("DELETE", "/api/session")); }
-    ui.pin = k === "⌫" ? ui.pin.slice(0, -1) : (ui.pin + k).slice(0, PIN_LEN);
+    if (k === "Cancel") { ui.pin = ""; ui.pad = null; return go(() => call("POST", "/api/mode", {action: "out"})); }
+    if (k !== "✓") ui.pin = k === "⌫" ? ui.pin.slice(0, -1) : (ui.pin + k).slice(0, PIN_LEN);
     render();
-    if (ui.pin.length === PIN_LEN) { const pin = ui.pin; ui.pin = ""; go(() => call("POST", "/api/pin", {pin})); }
+    if (k === "✓" || ui.pin.length === PIN_LEN) { const pin = ui.pin; ui.pin = ""; go(() => call("POST", "/api/pin", {pin}).then(() => { ui.pad = null; })); }
   },
+  qr: () => go(() => call("POST", "/api/qr")),
   remove: id => go(() => call("POST", "/api/session/remove", {asset_id: id}).then(() => say("Removed from your list"))),
   done: () => go(async () => {
     const r = await call("POST", "/api/session/finish");
@@ -447,9 +451,10 @@ const acts = {
   isnap: () => go(() => call("POST", "/api/instructor/tool_photo", {asset_id: ui.inst.tool.asset_id})
     .then(r => { say(`Photo saved for ${r.name}`); return loadPhotos(); })),
   ipage: p => { ui.inst = {page: p, q: ""}; render(); search(); },
-  iback: () => { const p = ui.inst; if (p.person || p.tool) { p.person = p.tool = null; render(); } else { ui.inst = null; render(); } },
+  ilink: () => go(() => call("POST", "/api/instructor/link_tag", {asset_id: ui.inst.tool.asset_id}).then(() => { ui.inst = null; })),
+  iback: () => { const p = ui.inst; if (p.person || p.tool || p.given) { p.person = p.tool = p.given = null; render(); } else { ui.inst = null; render(); } },
   iperson: id => { const p = ui.inst, who = p.results.find(x => x.person_id === id);
-    if (p.page === "enroll") go(() => call("POST", "/api/instructor/enroll", {person_id: id}).then(() => { ui.inst = null; }));
+    if (p.page === "givepin") go(() => call("POST", "/api/instructor/pin", {person_id: id}).then(r => { p.given = r; }));
     else { p.person = who; render(); } },
   istart: a => go(() => call("POST", "/api/instructor/start", {person_id: ui.inst.person.person_id, action: a}).then(() => { ui.inst = null; })),
   iasset: () => go(() => call("POST", "/api/instructor/manual", {asset_id: ui.inst.q.trim()}).then(() => { ui.inst = null; })),
