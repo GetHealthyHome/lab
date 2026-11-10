@@ -19,11 +19,7 @@ say() { printf '\n== %s\n' "$*"; }
 
 # ---------- Run 1: the data partition ----------
 if ! blkid -L LTDATA >/dev/null 2>&1; then
-	if grep -q labtoolbox_split "$CMDLINE"; then
-		echo "Reboot first (sudo reboot). If you already did, making the data partition failed:"
-		echo "check the messages on screen during boot, or start again from a freshly flashed card."
-		exit 1
-	fi
+	grep -q labtoolbox_split "$CMDLINE" && echo "The data partition isn't there yet: setting it up again."
 	disk_gb=$(($(lsblk -bndo SIZE /dev/mmcblk0) / 1024 ** 3))
 	[ "$disk_gb" -ge $((ROOT_GB + 6)) ] || { echo "The SD card is ${disk_gb} GB; use a 16 GB or bigger card."; exit 1; }
 	say "Step 1 of 2: making room for a data partition"
@@ -32,8 +28,14 @@ if ! blkid -L LTDATA >/dev/null 2>&1; then
 	install -m755 "$DEPLOY/initramfs/lab-toolbox-hook" /etc/initramfs-tools/hooks/lab-toolbox
 	install -m755 "$DEPLOY/initramfs/lab-toolbox-split" /etc/initramfs-tools/scripts/local-premount/lab-toolbox-split
 	grep -q '^auto_initramfs=1' "$BOOT/config.txt" || echo 'auto_initramfs=1' >>"$BOOT/config.txt"
-	update-initramfs -u
-	sed -i "1 s/\$/ labtoolbox_split=$ROOT_GB/" "$CMDLINE"
+	kv=$(uname -r)
+	if [ -e "/boot/initrd.img-$kv" ]; then update-initramfs -u -k "$kv"; else update-initramfs -c -k "$kv"; fi
+	# The firmware loads initramfs8 next to kernel8.img (Pi 3, 64-bit); newer Pi OS doesn't always put it there
+	[ -e "$BOOT/kernel8.img" ] || { echo "$BOOT/kernel8.img not found; send the output of: ls $BOOT"; exit 1; }
+	cp "/boot/initrd.img-$kv" "$BOOT/initramfs8"
+	lsinitramfs "$BOOT/initramfs8" | grep -q lab-toolbox-split ||
+		{ echo "The startup file doesn't contain the partition step; not rebooting. Send this screen."; exit 1; }
+	grep -q labtoolbox_split "$CMDLINE" || sed -i "1 s/\$/ labtoolbox_split=$ROOT_GB/" "$CMDLINE"
 	say "Rebooting. The first boot takes a minute longer. When you can log in again, run this same command."
 	sleep 5
 	reboot
@@ -74,6 +76,7 @@ cd "$KIOSK"
 .venv/bin/pip install -e '.[pi]'
 
 say "Services"
+systemctl set-default multi-user.target # no desktop, if the card has one: the kiosk screen is the only display
 install -m644 "$DEPLOY"/*.service "$DEPLOY"/*.timer /etc/systemd/system/
 install -m644 "$DEPLOY/pam-lab-toolbox-screen" /etc/pam.d/lab-toolbox-screen
 mkdir -p /etc/chromium/policies/managed
