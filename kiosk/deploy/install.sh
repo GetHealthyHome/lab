@@ -24,7 +24,7 @@ if ! blkid -L LTDATA >/dev/null 2>&1; then
 	[ "$disk_gb" -ge $((ROOT_GB + 6)) ] || { echo "The SD card is ${disk_gb} GB; use a 16 GB or bigger card."; exit 1; }
 	say "Step 1 of 2: making room for a data partition"
 	apt-get update
-	apt-get install -y initramfs-tools e2fsprogs fdisk
+	apt-get install -y initramfs-tools e2fsprogs fdisk zstd # zstd: lsinitramfs needs it to open the startup file
 	install -m755 "$DEPLOY/initramfs/lab-toolbox-hook" /etc/initramfs-tools/hooks/lab-toolbox
 	install -m755 "$DEPLOY/initramfs/lab-toolbox-split" /etc/initramfs-tools/scripts/local-premount/lab-toolbox-split
 	grep -q '^auto_initramfs=1' "$BOOT/config.txt" || echo 'auto_initramfs=1' >>"$BOOT/config.txt"
