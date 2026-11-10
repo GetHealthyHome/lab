@@ -1,14 +1,14 @@
 # Web service + gate camera reader. Installed and enabled by install.sh
 [Unit]
-Description=Lab Toolbox kiosk (API, gate camera, buzzer)
+Description=Lab Toolbox kiosk (API, gate camera, NFC reader, buzzer)
 After=network.target
 # Database, photos and settings live on the data partition
 RequiresMountsFor=/data
 
 [Service]
 User=kiosk
-# video: camera access, gpio: buzzer
-SupplementaryGroups=video gpio
+# video: camera access, gpio: buzzer, i2c: NFC reader
+SupplementaryGroups=video gpio i2c
 WorkingDirectory=/opt/lab-toolbox/kiosk
 EnvironmentFile=/data/lab-toolbox.env
 # The GPIO library (lgpio) drops small pipe files in its working folder and can't in /opt (read-only for

@@ -190,6 +190,8 @@ MIGRATIONS = [
     """,
     # Tool photos for the kiosk screen: local path on the Pi (the Sheet gets the Drive link).
     "ALTER TABLE tools ADD COLUMN photo TEXT",
+    # NFC stickers: the sticker's built-in serial number, linked to a tool at the kiosk.
+    "ALTER TABLE tools ADD COLUMN nfc_uid TEXT; CREATE UNIQUE INDEX tools_nfc_uid ON tools(nfc_uid)",
 ]
 
 

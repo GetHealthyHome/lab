@@ -9,7 +9,6 @@ var DEFAULT_SETTINGS = [
   ['lab_close', '21:00', 'Lab closing time, 24-hour clock, kiosk local time (K16)'],
   ['grace_minutes', '15', 'Minutes after the due time before a tool counts as overdue (K16)'],
   ['hold_overdue', 'yes', 'Stop a student with overdue tools from borrowing more (K16)'],
-  ['require_pin', 'yes', 'Ask for a 4-digit PIN after the ID scan (K11)'],
   ['snapshot_interval_hours', '1', 'Hours between scheduled cage snapshots (C1)'],
   ['alert_email', '', 'Instructor on duty: gets an email when a missing-tool alert opens. Commas for several (D9)'],
   ['digest_email', '', 'Who gets the weekday morning digest. Commas for several (D10)'],

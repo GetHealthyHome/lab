@@ -12,7 +12,8 @@ KIOSK_DB=kiosk.db uvicorn lab_toolbox.app:app --port 8000
 pytest
 ```
 Open http://localhost:8000 in a window sized 800x480 (the official 7" screen). With no camera on a bench, "scan" a code with
-`curl -X POST localhost:8000/api/code -H 'Content-Type: application/json' -d '{"code":"ID-1001"}'`.
+`curl -X POST localhost:8000/api/pin -H 'Content-Type: application/json' -d '{"pin":"1234"}'` after giving P-1 a PIN
+(`python -m lab_toolbox.pins P-1`).
 
 ## The screen
 One lean page (`static/index.html`, no libraries) that only talks to the API below and asks it for the state once a second.
@@ -22,10 +23,27 @@ Dark by default; a supervisor can switch it to light with `screen_theme` on the 
 picks it up within 10 minutes). Buttons are at least 80 px (15 mm on the 7" screen); a normal checkout needs no typing. The on-screen keyboard only appears
 for instructor jobs and for finding a tool to report that isn't in your list.
 
-Screens: start (Check out / Return, Report a problem, Instructor) → PIN pad → scanning list with a 45 s countdown bar and a big
-Done → summary (due time, or a green RETURN TO banner per tool). Report a problem works from the start screen and from a
-session (damaged, not in its spot, worn label). Instructor mode: start a session for a student, type an asset number, link a
-new badge, move due times, release a locked tool.
+Screens: start (Check out / Return, Report a problem, Instructor) → PIN pad → scanning list with a 45 s countdown bar, a
+"Scan QR code instead" button and a big Done → summary (due time, or a green RETURN TO banner per tool). Report a problem
+works from the start screen and from a session (damaged, not in its spot, worn label). Instructor mode: start a session for
+a student, type an asset number, give someone a PIN, link an NFC sticker to a tool, move due times, release a locked tool.
+
+**PIN login and NFC stickers:** the PIN alone says who you are: 4 digits for students, 6 for instructors and supervisors,
+and no two people share one. The kiosk hands them out: Instructor → Give a PIN → pick the person, and the new PIN shows
+once on screen (also how a forgotten PIN is replaced). Tools are tapped on the NFC reader; each tool tapped out gets its own
+photo of the person, taken at that moment. A printed QR label still works: **Scan QR code instead** makes the gate camera
+read labels for the next minute. To link a sticker: Instructor → pick the tool → Link NFC sticker → tap the sticker. Any NFC
+sticker works, since only its built-in serial number is read.
+
+**First instructor PIN** (nobody can open instructor mode yet), on the Pi's keyboard (Ctrl+Alt+F2 to log in):
+```bash
+cd /opt/lab-toolbox/kiosk && sudo -u kiosk env KIOSK_DB=/data/kiosk.db .venv/bin/python -m lab_toolbox.pins P-9
+```
+with the person's `person_id` from the People tab. It prints the PIN. PINs are kept as an HMAC with a key in
+`/data/pin.key`; if that file is lost, everyone needs a new PIN.
+
+**NFC reader wiring** (PN532 board, switches set to I2C): VCC to pin 1 (3.3 V), GND to pin 6, SDA to pin 3, SCL to pin 5.
+`NFC_READER=pn532` in `/data/lab-toolbox.env` turns it on. `sudo i2cdetect -y 1` should show `24`.
 
 **Tool photos:** once a tool is labeled, an instructor taps **Take tool photos**, picks the tool and holds it up to the
 gate camera. The photo stays on the Pi (the screen must work offline) and a copy goes to Drive, with its link in a `photo`
@@ -41,8 +59,9 @@ over the shipped one.
 | Module | Job | PRD |
 | --- | --- | --- |
 | `db.py` | SQLite schema and migrations; WAL, synchronous NORMAL, foreign keys, 5 s busy timeout; append-only triggers on transactions, snapshots and audit log; `tool_state` view derives "out" from the latest transaction | Data model, Stability |
-| `sessions.py` | Checkout and return sessions: several tools per session, one gate photo per session, rejection rules, put-away spot on return, 45 s idle timeout that saves what was scanned. Also PIN prompts, instructor mode, battery pairing, kits, damage and problem reports, worn labels | K2–K9, K11–K15, K17 |
-| `pins.py` | Argon2id PIN hashes; 5 wrong tries lock the ID for 15 minutes | K11 |
+| `sessions.py` | Checkout and return sessions: several tools per session, a photo of the person per tool tapped out (one per session for returns), rejection rules, put-away spot on return, 45 s idle timeout that saves what was scanned. Also PIN login, instructor mode, NFC sticker linking, battery pairing, kits, damage and problem reports, worn labels | K2–K9, K11–K15, K17 |
+| `pins.py` | PIN hashes (HMAC, key on the Pi), unique random PINs (4 digits students, 6 staff), the first-PIN command | K11 |
+| `nfc.py` | PN532 NFC reader on I2C: reads a sticker's UID | |
 | `loans.py` | Due time (earlier of loan length or closing time), grace period, overdue list, overdue hold | K16 |
 | `sync.py` | Outbox queued in the same DB transaction as the record; sends oldest first, stops at the first failure, deletes a local photo once sent | K10 |
 | `google.py` | Google side of sync: pushes queued rows to Sheet tabs (matched by header name, new columns added), photos to Drive (each Sheet row gets the Drive link, retries never upload twice), and pulls Spots, Tools and People back down all-or-nothing | K10, Sync to Google |
@@ -51,26 +70,26 @@ over the shipped one.
 | `hardware.py` | Gate camera (picamera2: 640x480 grey stream for codes, 1280x960 for the session photo, continuous autofocus on Camera Module 3), USB cage webcam (`fswebcam`), GPIO buzzer with the PRD's sounds | K1, K4, C1 |
 | `spots.py` | Full / empty / unclear per shelf spot, and the camera-vs-records alert table | C3, C4 |
 | `cage.py` | Cage monitor, its own process: snapshots on the Settings schedule, after returns, on dashboard request; two-in-a-row rule; one open alert per spot, updated not repeated; alert photo with the spot boxed in red | C1, C5–C7 |
-| `app.py` | FastAPI JSON API (`/api/session`, `/scan`, `/finish`, `/code`, `/mode`, `/health`); with a gate camera it also runs the scan loop | K1, D8 |
+| `app.py` | FastAPI JSON API (`/api/session`, `/pin`, `/scan`, `/finish`, `/code`, `/qr`, `/mode`, `/health`); with a gate camera or NFC reader it also runs their read loops | K1, D8 |
 
 ## API
-- `POST /api/session` `{id_code, action: "out"|"in"}` starts a session.
+- `POST /api/pin` `{pin}` logs in: starts the session chosen with `/api/mode`, or (after Instructor) logs an instructor in. Five wrong PINs in a row lock the keypad for a minute (`locked`, with `until`) and open an `id_locked` alert.
 - `POST /api/session/scan` `{code}` adds a tool. Refusals come back as HTTP 409 `{reason}` with text ready for the screen.
 - `POST /api/session/finish` saves it; returns include `return_to` for each tool.
-- `GET /api/session` gives the open session (with kit piece names and, for a tool still waiting for a battery, which batteries fit and where they sit), `seconds_left` for the countdown bar, `auto_saved` when the idle timer saved one, and `last_event` (`{seq, ok, text}`) for the latest camera scan so the screen can flash green or red.
-- `POST /api/mode` `{action: "out"|"in"}`: the Check out / Return buttons. The next ID scan starts that kind of session, then it goes back to "out".
-- `POST /api/code` `{code}`: one code, routed the way a camera scan is (an ID with no session open, otherwise a tool), with sound. A USB barcode scanner can use this too.
+- `GET /api/session` gives the open session (with kit piece names and, for a tool still waiting for a battery, which batteries fit and where they sit), `seconds_left` for the countdown bar, `auto_saved` when the idle timer saved one, and `last_event` (`{seq, ok, text}`) for the latest scan so the screen can flash green or red, and `qr` while the camera is reading printed labels.
+- `POST /api/mode` `{action: "out"|"in"|"instructor"}`: the Check out / Return / Instructor buttons. The next PIN does that, then it goes back to "out".
+- `POST /api/code` `{code}`: one tool code (an NFC sticker UID or a printed label), routed the way an NFC tap or camera scan is, with sound. A USB barcode scanner can use this too.
+- `POST /api/qr`: the "Scan QR code instead" button; the gate camera reads printed labels for 60 s.
 - `DELETE /api/session` cancels.
-- `POST /api/pin` `{pin}` answers the PIN prompt on screen: a student's (`session.pin` is `check`, or `setup` the first time, when they choose one) or an instructor logging in.
 - `POST /api/session/remove` `{asset_id}` takes a tool back off the list. `POST /api/session/kit` `{kit_id, missing}` confirms a kit's pieces on return.
 - `POST /api/damage` `{asset_id, severity, tags, notes, photo}`, `POST /api/problem` `{asset_id, notes}` (tool not in its spot), `POST /api/label` `{asset_id, condition}` work from any screen. `asset_id` takes the engraved number or the label code; `GET /api/tools?q=` finds a tool by name.
 - `GET /api/loans` lists tools out with `due_at` and `overdue`.
-- Instructor mode: tap Instructor (`POST /api/mode {action: "instructor"}`) or scan an instructor badge during a student's session, then `POST /api/pin`. Then `POST /api/instructor/start` `{person_id, action}` (ID won't scan), `/manual` `{asset_id}` (label won't scan), `/enroll` `{person_id}` (the next scanned card becomes theirs), `/extend` `{asset_id, due_at}`, `/clear` `{asset_id, note}` (release from quarantine), `/logout`; `GET /api/instructor/people?q=`. Every one is logged in AuditLog with the instructor's name. An instructor who walks away is logged out after 90 seconds.
+- Instructor mode: tap Instructor (`POST /api/mode {action: "instructor"}`, also during a student's session), then `POST /api/pin`. Then `POST /api/instructor/start` `{person_id, action}` (student without their PIN), `/manual` `{asset_id}` (label won't scan), `/pin` `{person_id}` (new random PIN, returned once), `/link_tag` `{asset_id}` (the next NFC sticker tapped becomes this tool's), `/extend` `{asset_id, due_at}`, `/clear` `{asset_id, note}` (release from quarantine), `/logout`; `GET /api/instructor/people?q=`. Every one is logged in AuditLog with the instructor's name. An instructor who walks away is logged out after 90 seconds.
 
 Refusals are HTTP 409 `{reason, kind}`; `kind` is `rejected` (red flash), `wrong_battery` (amber, with `required` and `scanned`) or `locked` (lock screen, with `until`), and the buzzer plays the matching sound.
 
 How the new rules behave:
-- **PIN** (K11): on unless the `require_pin` setting is `no`. A person with no PIN chooses one on their next scan; a supervisor's PIN reset on the dashboard clears it so they choose again. Five wrong tries lock that ID for 15 minutes and open an `id_locked` alert.
+- **PIN** (K11): always on; it is how people log in. A supervisor's PIN reset on the dashboard clears it until an instructor gives a new one at the kiosk.
 - **Batteries** (K12): a tool with `needs_battery` can't be saved until a battery of its `battery_group_id` is scanned. The scan reply lists which batteries fit and where the available ones sit. If the session times out, what was scanned is saved anyway: it left the cage.
 - **Kits** (K13): scanning a kit's case code adds every available piece (standard) or asks for each piece to be scanned (verified). On return, the student confirms the pieces; anything missing stays checked out, the kit is marked incomplete and a `kit_incomplete` alert opens.
 - **Damage** (K14): Needs inspection or Safety hazard quarantines the tool. It can still be returned, but not checked out until an instructor releases it (here or on the dashboard).

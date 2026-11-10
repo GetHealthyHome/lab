@@ -32,4 +32,5 @@ INSERT INTO people (person_id, id_code, name, role) VALUES
 if __name__ == "__main__":
     conn = db.connect(sys.argv[1] if len(sys.argv) > 1 else "kiosk.db")
     conn.executescript(DEMO + SCREEN_DEMO)
-    print("Seeded: student IDs ID-1001, ID-1002; instructor badge ID-9001; tools T-0001..T-0006 (T-0003 drill needs T-0004 battery); kit case K-0001")
+    print("Seeded: students P-1, P-2; instructor P-9; tools T-0001..T-0006 (T-0003 drill needs T-0004 battery); kit case K-0001."
+          " Give PINs with: python -m lab_toolbox.pins P-1")

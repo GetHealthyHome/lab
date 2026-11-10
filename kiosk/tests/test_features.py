@@ -1,11 +1,11 @@
-"""K7, K8, K11-K17: PINs, instructor mode, batteries, kits, damage, worn labels, loans, badge enroll."""
+"""K7, K8, K11-K16: PIN login, instructor mode, NFC stickers, batteries, kits, damage, worn labels, loans."""
 import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
-from lab_toolbox import loans
+from lab_toolbox import loans, pins
 from lab_toolbox.app import create_app
 from lab_toolbox.sessions import Kiosk, Locked, Rejected, WrongBattery
 
@@ -49,68 +49,73 @@ def queued(conn, kind):
     return [json.loads(r[0]) for r in conn.execute("SELECT payload FROM sync_queue WHERE kind = ? ORDER BY id", (kind,))]
 
 
-def pins_on(conn):
-    conn.execute("UPDATE settings SET value = 'yes' WHERE key = 'require_pin'")
+def give_pin(conn, person_id, pin):
+    conn.execute("UPDATE people SET pin_hash = ? WHERE person_id = ?", (pins.hash_pin(pin), person_id))
 
 
-# -- K11 PINs ----------------------------------------------------------------------------------------
+# -- PIN login -----------------------------------------------------------------------------------------
 
-def test_first_scan_sets_a_pin_then_it_is_checked(k, conn):
-    pins_on(conn)
-    assert k.handle("ID-1001")["pin"] == "setup"
-    with pytest.raises(Rejected, match="Choose your 4-digit PIN"):
-        k.scan("T-0001")
-    with pytest.raises(Rejected, match="4 digits"):
-        k.enter_pin("12a4")
-    k.enter_pin("2468")
-    k.scan("T-0001")
-    k.finish()
-    h = conn.execute("SELECT pin_hash FROM people WHERE person_id = 'P-1'").fetchone()[0]
-    assert h.startswith("$argon2id$") and "2468" not in h
-    assert queued(conn, "person") == [{"person_id": "P-1", "pin_hash": h}]  # only the PIN cell goes to the Sheet
-
-    assert k.handle("ID-1001")["pin"] == "check"
-    with pytest.raises(Rejected, match="Wrong PIN. 4 tries left"):
-        k.enter_pin("1111")
-    assert k.enter_pin("2468")["pin"] == "ok"
-
-
-def test_five_wrong_pins_lock_the_id_for_15_minutes(k, conn, wall):
-    pins_on(conn)
-    k.handle("ID-1001")
-    k.enter_pin("2468")
+def test_pin_alone_logs_in_and_staff_use_six_digits(k, conn):
+    give_pin(conn, "P-1", "2468")
+    give_pin(conn, "P-9", "135790")
+    assert k.login("2468") == {"id": k.session.id, "action": "out", "person": "Jordan"}
     k.cancel()
-    k.handle("ID-1001")
+    k.next_action = "in"
+    assert k.login("135790")["person"] == "Ms. Rivera"  # staff borrow and return too
+    assert k.session.action == "in"
+    k.cancel()
+    with pytest.raises(Rejected, match="4 digits"):
+        k.login("12a4")
+    k.next_action = "instructor"
+    with pytest.raises(Rejected, match="Instructors only"):
+        k.login("2468")
+    assert k.login("135790") == {"instructor": "Ms. Rivera"} and k.next_action == "out"
+
+
+def test_five_wrong_pins_lock_the_keypad_for_a_minute(k, conn, wall):
+    give_pin(conn, "P-1", "2468")
     for _ in range(4):
-        with pytest.raises(Rejected):
-            k.enter_pin("0000")
+        with pytest.raises(Rejected, match="not recognized"):
+            k.login("0000")
     with pytest.raises(Locked) as e:
-        k.enter_pin("0000")
-    assert e.value.sound == "locked" and e.value.details["until"] == "2026-11-09T18:15:00+00:00"
-    assert k.session is None
+        k.login("0000")
+    assert e.value.sound == "locked" and e.value.details["until"] == "2026-11-09T18:01:00+00:00"
     alert, = queued(conn, "alert")
-    assert alert["type"] == "id_locked" and alert["last_person_name"] == "Jordan"
+    assert alert["type"] == "id_locked"
     with pytest.raises(Locked):
-        k.start("ID-1001", "out")
-    wall.t += timedelta(minutes=16)
-    k.start("ID-1001", "out")
-    assert k.enter_pin("2468")["pin"] == "ok"
+        k.login("2468")  # even the right PIN waits
+    wall.t += timedelta(minutes=2)
+    assert k.login("2468")["person"] == "Jordan"
 
 
-# -- K7 instructor mode, K17 badge enroll ---------------------------------------------------------------
+def test_instructor_gives_unique_pins(k, conn, monkeypatch):
+    login(k, conn)
+    taken = pins.hash_pin("0001")
+    conn.execute("UPDATE people SET pin_hash = ? WHERE person_id = 'P-1'", (taken,))
+    draws = iter([1, 1, 7])  # the first two draws are Jordan's PIN, so Sam gets the third
+    monkeypatch.setattr(pins.secrets, "randbelow", lambda n: next(draws))
+    assert k.assign_pin("P-2") == {"name": "Sam", "pin": "0007"}
+    h = conn.execute("SELECT pin_hash FROM people WHERE person_id = 'P-2'").fetchone()[0]
+    assert "0007" not in h and queued(conn, "person") == [{"person_id": "P-2", "pin_hash": h}]
+    monkeypatch.setattr(pins.secrets, "randbelow", lambda n: n - 1)
+    assert k.assign_pin("P-9")["pin"] == "999999"  # staff: 6 digits
+    assert conn.execute("SELECT reason FROM audit_log").fetchone()[0] == "New PIN given at the kiosk"
 
-def login(k, conn, pin="9999"):
-    out = k.handle("ID-9") if k.session else (setattr(k, "next_action", "instructor") or k.handle("ID-9"))
-    assert "instructor_pin" in out
-    k.enter_pin(pin)
+
+# -- K7 instructor mode, NFC stickers -------------------------------------------------------------------
+
+def login(k, conn, pin="246813"):
+    give_pin(conn, "P-9", pin)
+    k.next_action = "instructor"
+    k.login(pin)
     assert k.instructor["name"] == "Ms. Rivera"
 
 
 def test_instructor_types_asset_number_for_a_worn_label(k, conn):
-    k.handle("ID-1001")
-    with pytest.raises(Rejected, match="Instructor: scan your badge"):
+    k.start("ID-1001", "out")
+    with pytest.raises(Rejected, match="Instructor: tap Instructor"):
         k.add_by_asset("HHA-0002")
-    login(k, conn)  # badge scanned in the middle of Jordan's session
+    login(k, conn)  # steps in during Jordan's session
     k.add_by_asset("HHA-0002")
     k.finish()
     t = conn.execute("SELECT person_id, override_by FROM transactions").fetchone()
@@ -120,7 +125,7 @@ def test_instructor_types_asset_number_for_a_worn_label(k, conn):
     assert queued(conn, "audit")[0]["who"] == "Ms. Rivera"
 
 
-def test_instructor_starts_session_for_id_that_wont_scan_and_bypasses_hold(k, conn, wall):
+def test_instructor_starts_session_for_student_without_pin_and_bypasses_hold(k, conn, wall):
     login(k, conn)
     k.start_for("P-2", "out")
     k.scan("T-0001")
@@ -132,23 +137,17 @@ def test_instructor_starts_session_for_id_that_wont_scan_and_bypasses_hold(k, co
     assert k.session.override_by["name"] == "Ms. Rivera"
 
 
-def test_badge_enroll_links_next_scanned_card(k, conn):
+def test_link_nfc_sticker_to_a_tool(k, conn):
     login(k, conn)
-    assert k.enroll("P-2")["waiting"]
-    with pytest.raises(Rejected, match="belongs to Jordan"):
-        k.handle("ID-1001")
-    k.enroll("P-2")
-    assert k.handle("NEW-CARD-7") == {"enroll": "Sam", "id_code": "NEW-CARD-7"}
-    assert conn.execute("SELECT id_code FROM people WHERE person_id = 'P-2'").fetchone()[0] == "NEW-CARD-7"
-    assert queued(conn, "person")[-1] == {"person_id": "P-2", "id_code": "NEW-CARD-7"}
-
-
-def test_badge_scan_waits_for_the_pin(k, conn, clock):
-    clock.t += 1000  # a kiosk that has been up a while: the badge must not count as already idle
-    k.next_action = "instructor"
-    k.handle("ID-9")
-    k.expire_idle()
-    assert k.state()["instructor_pin"]
+    assert k.link_tag("HHA-0001")["waiting"]
+    assert k.state()["link_for"] == "Digital multimeter"
+    with pytest.raises(Rejected, match="belongs to Manifold gauge set"):
+        k.handle("T-0002")
+    k.link_tag("HHA-0001")
+    assert k.handle(" 04A1B2C3 ") == {"link": "Digital multimeter", "nfc_uid": "04A1B2C3"}
+    assert queued(conn, "tool")[-1] == {"asset_id": "HHA-0001", "nfc_uid": "04A1B2C3"}
+    k.start("ID-1001", "out")
+    assert k.handle("04A1B2C3")["asset_id"] == "HHA-0001"
 
 
 def test_instructor_logs_out_after_walking_away(k, conn, clock):
@@ -333,11 +332,10 @@ class FakeBuzzer:
 
 def test_api_sounds_and_kinds(k, conn):
     buzzer = FakeBuzzer()
-    pins_on(conn)
+    give_pin(conn, "P-1", "1357")
     with TestClient(create_app(k, buzzer=buzzer)) as c:
-        assert c.post("/api/code", json={"code": "ID-1001"}).json()["pin"] == "setup"
-        assert "Choose a 4-digit PIN" in c.get("/api/session").json()["last_event"]["text"]
-        assert c.post("/api/pin", json={"pin": "1357"}).json()["pin"] == "ok"
+        assert c.post("/api/pin", json={"pin": "1357"}).json()["person"] == "Jordan"
+        assert c.get("/api/session").json()["last_event"]["text"] == "Hi, Jordan"
         c.post("/api/code", json={"code": "T-0010"})
         r = c.post("/api/code", json={"code": "B-2"})
         assert r.status_code == 409 and r.json()["kind"] == "wrong_battery" and r.json()["required"] == "DeWalt 20V Max"
@@ -347,7 +345,7 @@ def test_api_sounds_and_kinds(k, conn):
         c.post("/api/damage", json={"asset_id": "T-0002", "severity": "needs_inspection", "photo": False})
         c.post("/api/label", json={"asset_id": "HHA-0002", "condition": "Torn"})
         st = c.get("/api/session").json()
-        assert st["session"]["pin"] == "ok" and st["instructor"] is None
+        assert st["session"]["person"] == "Jordan" and st["instructor"] is None
         assert c.get("/api/tools", params={"q": "gauge"}).json()[0]["state"] == "quarantined"
         assert c.get("/api/loans").json() == []
         assert c.post("/api/instructor/manual", json={"asset_id": "HHA-0001"}).status_code == 409
