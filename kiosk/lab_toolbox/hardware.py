@@ -46,18 +46,43 @@ class PiGateCamera:
 
 
 class UsbCageCamera:
-    """USB webcam aimed at the shelves. Uses the fswebcam tool (apt install fswebcam)."""
+    """USB webcam(s) aimed at the shelves. Uses the fswebcam tool (apt install fswebcam).
+
+    Two or more devices, separated by commas, give one picture with the views stacked top to bottom, like
+    photos taped into one tall panorama. Everything downstream (spots, calibration, alerts) sees one camera.
+    """
 
     def __init__(self, device: str = "/dev/video0", size: str = "1280x720"):
-        self.device = device
+        self.devices = [d.strip() for d in device.split(",") if d.strip()]
         self.size = size
 
     def snapshot(self, path: str) -> str:
+        if len(self.devices) == 1:
+            return self._shot(self.devices[0], path)
+        from PIL import Image
+
+        # shortcut: one dead camera fails the whole picture (every spot reads "unclear"); a blank half would
+        # read as "tool missing". Upgrade to per-camera spots if one camera proves flaky.
+        parts = [f"{path}.{i}.jpg" for i in range(len(self.devices))]
+        try:
+            views = [Image.open(self._shot(d, p)).convert("RGB") for d, p in zip(self.devices, parts)]
+            sheet = Image.new("RGB", (max(v.width for v in views), sum(v.height for v in views)))
+            y = 0
+            for v in views:
+                sheet.paste(v, (0, y))
+                y += v.height
+            sheet.save(path, quality=90)
+        finally:
+            for p in parts:
+                Path(p).unlink(missing_ok=True)
+        return path
+
+    def _shot(self, device: str, path: str) -> str:
         # -S 20 skips the first frames so auto exposure settles before the shot
-        subprocess.run(["fswebcam", "-q", "-d", self.device, "-r", self.size, "--no-banner", "-S", "20", path],
+        subprocess.run(["fswebcam", "-q", "-d", device, "-r", self.size, "--no-banner", "-S", "20", path],
                        check=True, timeout=30)
         if not Path(path).exists():  # fswebcam can exit 0 without writing when the camera is unplugged
-            raise RuntimeError(f"no picture from {self.device}")
+            raise RuntimeError(f"no picture from {device}")
         return path
 
 

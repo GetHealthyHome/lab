@@ -194,3 +194,23 @@ def test_reference_photo_for_calibration_is_kept_and_mapped_back(conn, mon, tmp_
     sink.pull()
     assert tuple(conn.execute("SELECT box, reference_photo FROM spots WHERE spot_id = ?", (A,)).fetchone()) == (
         "[1, 2, 3, 4]", ref["reference_photo"])
+
+
+def test_two_cage_cameras_make_one_stacked_picture(tmp_path, monkeypatch):
+    from lab_toolbox import hardware
+
+    shades = {"/dev/top": 200, "/dev/bottom": 50}
+
+    def fswebcam(cmd, **kw):
+        if cmd[cmd.index("-d") + 1] in shades:  # an unplugged camera writes nothing
+            Image.fromarray(np.full((72, 128), shades[cmd[cmd.index("-d") + 1]], dtype=np.uint8)).save(cmd[-1])
+
+    monkeypatch.setattr(hardware.subprocess, "run", fswebcam)
+    out = hardware.UsbCageCamera("/dev/top, /dev/bottom").snapshot(str(tmp_path / "cage.jpg"))
+    img = np.asarray(Image.open(out).convert("L"))
+    assert img.shape == (144, 128)
+    assert img[:72].mean() > 190 and img[72:].mean() < 60  # first camera on top
+    assert [p.name for p in tmp_path.iterdir()] == ["cage.jpg"]  # the two halves are not left behind
+    with pytest.raises(RuntimeError, match="/dev/gone"):
+        hardware.UsbCageCamera("/dev/top,/dev/gone").snapshot(str(tmp_path / "bad.jpg"))
+    assert [p.name for p in tmp_path.iterdir()] == ["cage.jpg"]  # nor after a failure
