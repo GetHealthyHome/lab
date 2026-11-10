@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Lab logo placeholder">
-  <!-- Placeholder: drop the lab's own logo in as static/logo.png (or overwrite this file) -->
-  <rect x="6" y="6" width="188" height="188" rx="28" fill="none" stroke="#94a3b8" stroke-width="8" stroke-dasharray="18 12"/>
-  <text x="100" y="92" text-anchor="middle" font-family="system-ui, sans-serif" font-size="34" font-weight="700" fill="#94a3b8">LAB</text>
-  <text x="100" y="134" text-anchor="middle" font-family="system-ui, sans-serif" font-size="34" font-weight="700" fill="#94a3b8">LOGO</text>
-</svg>

@@ -74,7 +74,7 @@ usermod -aG video,gpio,render,input kiosk
 mkdir -p /data/photos /data/backups /data/journal /var/log/journal
 chown kiosk:kiosk /data /data/photos /data/backups
 [ -f /data/lab-toolbox.env ] || install -m600 -o kiosk -g kiosk "$DEPLOY/lab-toolbox.env.example" /data/lab-toolbox.env
-# The lab's logo lives on /data so it can be swapped while the system is locked; no file = placeholder logo
+# An override logo can live on /data so it can be swapped while the system is locked; no file = the shipped lab-logo.png
 ln -sfn /data/logo.png "$KIOSK/lab_toolbox/static/logo.png"
 
 say "Python app"

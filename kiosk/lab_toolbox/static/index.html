@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Kiosk screen for the 7" touchscreen (800x480) in Chromium kiosk mode. One lean page, no libraries: it only talks to /api.
-     Logo: drop the lab's logo in as static/logo.png (or overwrite static/logo.svg); it shows big on the start screen and small in every header. -->
+     Logo: static/lab-logo.png (the Lab Toolbox logo) unless a static/logo.png override exists; big on the start screen, small in every header. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -23,7 +23,7 @@ html, body { height:100%; background:var(--bg); color:var(--text); font:24px/1.2
 #app.f-bad { animation:shake .3s; }
 @keyframes shake { 25% { transform:translateX(-8px); } 75% { transform:translateX(8px); } }
 header { height:56px; flex:none; display:flex; align-items:center; gap:12px; padding:0 18px; background:var(--panel); border-bottom:2px solid var(--line); }
-header img { height:42px; width:42px; object-fit:contain; }
+header img { height:46px; width:46px; object-fit:contain; background:#fff; border-radius:8px; padding:2px; }  /* white tile: the logo's black lettering must show on the dark look */
 header .t { flex:1; font-size:26px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .clock { color:var(--muted); font-size:22px; }
 main { flex:1; min-height:0; padding:14px 18px; display:flex; flex-direction:column; gap:12px; }
@@ -44,7 +44,7 @@ h1 { font-size:40px; } h2 { font-size:28px; } .muted { color:var(--muted); } .sm
 /* start screen */
 .idle { flex:1; display:flex; gap:24px; padding:22px; }
 .idle .brand { width:300px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; }
-.idle .brand img { width:230px; height:230px; object-fit:contain; }
+.idle .brand img { width:260px; height:300px; object-fit:contain; background:#fff; border-radius:24px; padding:14px; }
 .idle .prompt { font-size:30px; font-weight:700; min-height:84px; display:flex; align-items:center; }
 .idle .mode { flex:1; font-size:36px; min-height:110px; }
 /* session */
@@ -102,9 +102,9 @@ const NOTES = ["Inspected, no damage", "Repaired", "Damage is cosmetic only"];
 let photos = {};  // asset_id -> version, for tools with a photo on this Pi
 const thumb = (id, style = "") => photos[id] ? `<img class="thumb" style="${style}" src="/api/tools/${encodeURIComponent(id)}/photo?v=${photos[id]}" alt="">` : "";
 const loadPhotos = () => call("GET", "/api/photos").then(p => { photos = p; render(); }).catch(() => {});
-let st = null, lastSeq = null, lastHtml = "", flashTimer, lastTap = Date.now(), logo = "/static/logo.svg";
+let st = null, lastSeq = null, lastHtml = "", flashTimer, lastTap = Date.now(), logo = "/static/lab-logo.png";
 const ui = { pin: "", msg: null, summary: null, locked: null, report: null, inst: null, seenSaved: undefined, cancelArm: 0 };
-// The lab's own logo wins if someone dropped in logo.png; otherwise the placeholder SVG.
+// A logo.png dropped on the Pi (/data/logo.png) wins over the logo shipped in the repo.
 const probe = new Image(); probe.onload = () => { logo = probe.src; lastHtml = ""; render(); }; probe.src = "/static/logo.png";
 
 // ---------- talking to the kiosk service ----------
@@ -176,7 +176,7 @@ function idleView() {
   const prompt = next === "instructor" ? "Instructor: hold your badge up to the camera"
     : next === "in" ? "Return: hold your ID up to the camera" : "Hold your ID up to the camera to check out";
   return [null, `<div class="idle">
-    <div class="brand"><img src="${logo}" alt="Lab logo"><h1>Lab Toolbox</h1></div>
+    <div class="brand"><img src="${logo}" alt="Lab Toolbox"></div>
     <div class="col grow">
       ${recent ? msgBar("") : `<div class="prompt">${esc(prompt)}</div>`}
       ${next === "instructor" ? `<div class="card blue grow" style="display:flex;align-items:center;font-size:30px">Waiting for an instructor badge…</div>
