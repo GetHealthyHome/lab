@@ -9,8 +9,10 @@ class FakeSheet {
   constructor(name, rows) { this.name = name; this.rows = rows; }
   getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0); }
   getDataRange() { const w = this.getLastColumn(); return { getValues: () => this.rows.map((r) => [...r, ...Array(w - r.length).fill('')]) }; }
+  getMaxRows() { return 1000; }
   getRange(r, c, nr = 1, nc = 1) {
     return {
+      setDataValidation: (rule) => { (this.validations ||= {})[c] = { from: r, rows: nr, ...rule }; },
       getValues: () => this.getDataRange().getValues().slice(r - 1, r - 1 + nr).map((row) => row.slice(c - 1, c - 1 + nc)),
       setValues: (vals) => vals.forEach((v, i) => { const row = (this.rows[r - 1 + i] ||= []); v.forEach((x, j) => { row[c - 1 + j] = x; }); }),
       setValue: (v) => { const row = (this.rows[r - 1] ||= []); row[c - 1] = v; },
@@ -20,13 +22,18 @@ class FakeSheet {
   deleteRow(i) { this.rows.splice(i - 1, 1); }
 }
 
-function load(tabs, email = 'boss@lab.org', owner = 'owner@lab.org') {
+function load(tabs, email = 'boss@lab.org', owner = 'owner@lab.org', runsAs) {
   const sheets = Object.fromEntries(Object.entries(tabs).map(([k, v]) => [k, new FakeSheet(k, structuredClone(v))]));
   const sent = [];
   const ctx = {
     sheets, sent, console, JSON, Date, Math,
-    SpreadsheetApp: { getActive: () => ({ getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = new FakeSheet(n, [])) }) },
-    Session: { getActiveUser: () => ({ getEmail: () => email }), getEffectiveUser: () => ({ getEmail: () => owner }), getScriptTimeZone: () => 'UTC' },
+    SpreadsheetApp: {
+      getActive: () => ({ getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = new FakeSheet(n, [])),
+        getOwner: () => (owner ? { getEmail: () => owner } : null) }),
+      newDataValidation: () => { const r = {}; return { requireValueInList(v) { r.list = v; return this; }, setAllowInvalid(a) { r.allowInvalid = a; return this; }, build: () => r }; },
+    },
+    // runsAs: the account the script runs as. The deployer by default; the visitor when deployed as "User accessing".
+    Session: { getActiveUser: () => ({ getEmail: () => email }), getEffectiveUser: () => ({ getEmail: () => runsAs ?? owner }), getScriptTimeZone: () => 'UTC' },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     Utilities: { getUuid: () => 'aaaa-bbbb', formatDate: (d, tz, f) => ({ Z: '+0000', u: String(d.getUTCDay() || 7), H: String(d.getUTCHours()) }[f] ?? d.toISOString().slice(0, 10)) },
     MailApp: { sendEmail: (o) => sent.push(o) },
@@ -72,6 +79,11 @@ test('grace period and extensions push the overdue line out', () => {
 test('only staff on the People list (or the owner) get in', () => {
   assert.throws(() => load({ People: PEOPLE }, 'stranger@x.com').api('home'), /not on the staff list/);
   assert.strictEqual(load({ People: PEOPLE }, 'owner@lab.org').api('settings').me.role, 'supervisor');
+  // Personal Google accounts: the script runs as whoever opens it. That must not make a visitor the owner.
+  assert.throws(() => load({ People: PEOPLE }, 'stranger@x.com', 'owner@lab.org', 'stranger@x.com').api('home'), /not on the staff list/);
+  assert.strictEqual(load({ People: PEOPLE }, 'owner@lab.org', 'owner@lab.org', 'owner@lab.org').api('settings').me.role, 'supervisor');
+  // Shared Drive: the Sheet has no owner, so the deploying account stands in.
+  assert.strictEqual(load({ People: PEOPLE }, 'deployer@lab.org', null, 'deployer@lab.org').api('settings').me.role, 'supervisor');
   assert.throws(() => load({ People: PEOPLE }, 'rivera@lab.org').api('saveSettings', { values: { loan_hours: '2' } }), /Only supervisors/);
 });
 
@@ -250,4 +262,13 @@ test('morning digest goes out once on weekdays at the digest hour', () => {
   assert.match(m.htmlBody, /Multimeter \(HHA-1\): Faded/);
   assert.match(m.htmlBody, /Saw \(HHA-3\)/);
   assert.strictEqual(g.sent.length, 2);
+});
+
+test('addDropdowns puts a list on fixed-choice columns, found by header name, as a warning only', () => {
+  const g = load({ People: PEOPLE, Tools: [['asset_id', 'is_battery', 'status']], Kits: [] });
+  assert.deepStrictEqual([...g.addDropdowns()], ['Tools.status', 'Tools.is_battery', 'People.role', 'People.active']);
+  const v = JSON.parse(JSON.stringify({ people: g.sheets.People.validations, tools: g.sheets.Tools.validations }));  // out of the vm's realm
+  assert.deepStrictEqual(v.people[4], { from: 2, rows: 999, list: ['student', 'instructor', 'supervisor'], allowInvalid: true });
+  assert.deepStrictEqual(v.people[6].list, ['yes', 'no']);
+  assert.deepStrictEqual(v.tools[3].list, ['available', 'quarantined', 'retired']);
 });
