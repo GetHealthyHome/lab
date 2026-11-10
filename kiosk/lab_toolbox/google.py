@@ -204,7 +204,8 @@ class GoogleSink:
                     {"person_id": p["person_id"], "id_code": p["id_code"], "name": p["name"], "email": p.get("email") or None,
                      "role": role if role in ("student", "instructor", "supervisor") else "student",
                      "pin_hash": p.get("pin_hash") or None,
-                     "active": _truthy(p.get("active", True))},
+                     # blank means active, as on the dashboard: only an explicit no switches a person off
+                     "active": _truthy(p["active"]) if str(p.get("active", "")).strip() else 1},
                 )
             for st in settings:
                 self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
