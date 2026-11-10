@@ -14,7 +14,8 @@ EnvironmentFile=/data/lab-toolbox.env
 # The GPIO library (lgpio) drops small pipe files in its working folder and can't in /opt (read-only for
 # kiosk); without this it fails to load and the buzzer falls back to a driver that can't play tones
 Environment=LG_WD=/tmp
-ExecStart=/opt/lab-toolbox/kiosk/.venv/bin/uvicorn lab_toolbox.app:app --host 127.0.0.1 --port 8000
+# No access log: the screen asks /api/session every second, which buries real messages and wears the card
+ExecStart=/opt/lab-toolbox/kiosk/.venv/bin/uvicorn lab_toolbox.app:app --host 127.0.0.1 --port 8000 --no-access-log
 Restart=always
 RestartSec=2
 
