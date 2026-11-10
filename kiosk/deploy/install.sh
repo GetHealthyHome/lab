@@ -70,11 +70,11 @@ ln -sf "$(command -v chromium || command -v chromium-browser)" /usr/local/bin/la
 
 say "Kiosk user and data folders"
 id kiosk >/dev/null 2>&1 || useradd -m -s /usr/sbin/nologin kiosk
-usermod -aG video,gpio,render,input kiosk
+usermod -aG video,gpio,render,input,i2c kiosk
 mkdir -p /data/photos /data/backups /data/journal /var/log/journal
 chown kiosk:kiosk /data /data/photos /data/backups
 [ -f /data/lab-toolbox.env ] || install -m600 -o kiosk -g kiosk "$DEPLOY/lab-toolbox.env.example" /data/lab-toolbox.env
-# An override logo can live on /data so it can be swapped while the system is locked; no file = the shipped lab-logo.png
+# An override logo can live on /data so it can be swapped while the system is locked; no file = the shipped lab-mark.png
 ln -sfn /data/logo.png "$KIOSK/lab_toolbox/static/logo.png"
 
 say "Python app"
@@ -99,6 +99,7 @@ for s in bluetooth hciuart ModemManager triggerhappy cups apt-daily.timer apt-da
 done
 grep -q '^dtoverlay=disable-bt' "$BOOT/config.txt" || echo 'dtoverlay=disable-bt' >>"$BOOT/config.txt"
 grep -q '^disable_splash=1' "$BOOT/config.txt" || echo 'disable_splash=1' >>"$BOOT/config.txt"
+raspi-config nonint do_i2c 0 # I2C on, for the NFC reader
 # Swap in compressed RAM instead of on the SD card (newer Pi OS already does this)
 if dpkg -s dphys-swapfile >/dev/null 2>&1; then
 	systemctl disable --now dphys-swapfile || true

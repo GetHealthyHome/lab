@@ -1,13 +1,20 @@
 from fastapi.testclient import TestClient
 
+from lab_toolbox import pins
 from lab_toolbox.app import create_app
 from lab_toolbox.sessions import Kiosk
+
+
+def pin_login(c, conn, action="out"):
+    conn.execute("UPDATE people SET pin_hash = ? WHERE person_id = 'P-1'", (pins.hash_pin("1234"),))
+    c.post("/api/mode", json={"action": action})
+    return c.post("/api/pin", json={"pin": "1234"})
 
 
 def test_checkout_over_http(conn, clock):
     with TestClient(create_app(Kiosk(conn, "gate-1", clock=clock))) as c:
         assert c.get("/").status_code == 200
-        assert c.post("/api/session", json={"id_code": "ID-1001", "action": "out"}).json()["person"] == "Jordan"
+        assert pin_login(c, conn).json()["person"] == "Jordan"
         assert c.post("/api/session/scan", json={"code": "T-0001"}).json()["asset_id"] == "HHA-0001"
         r = c.post("/api/session/scan", json={"code": "NOPE"})
         assert r.status_code == 409 and "Unknown code" in r.json()["reason"]
@@ -24,16 +31,17 @@ def test_screen_gets_battery_and_kit_piece_names(conn, clock):
     from lab_toolbox.seed import SCREEN_DEMO
     conn.executescript(SCREEN_DEMO)
     with TestClient(create_app(Kiosk(conn, "gate-1", clock=clock))) as c:
-        assert c.get("/static/lab-logo.png").status_code == 200
+        assert c.get("/static/lab-mark.png").status_code == 200
+        assert c.get("/static/fonts/material-symbols.woff2").status_code == 200
         assert c.get("/static/fonts/hanken-grotesk.woff2").status_code == 200  # fonts ship with the kiosk, no internet needed
-        c.post("/api/session", json={"id_code": "ID-1001", "action": "out"})
+        pin_login(c, conn)
         c.post("/api/session/scan", json={"code": "T-0003"})
         s = c.get("/api/session").json()["session"]
         assert s["battery_options"]["HHA-0003"]["available"][0]["spot"] == "Shelf 02, bay 01, charger 01"
         c.post("/api/session/scan", json={"code": "T-0004"})
         c.post("/api/session/scan", json={"code": "K-0001"})
         c.post("/api/session/finish")
-        c.post("/api/session", json={"id_code": "ID-1001", "action": "in"})
+        pin_login(c, conn, "in")
         c.post("/api/session/scan", json={"code": "K-0001"})
         kit = c.get("/api/session").json()["session"]["kits"][0]
         assert [p["name"] for p in kit["waiting"]] == ["Flare tool", "Tubing cutter"]
@@ -81,7 +89,7 @@ def test_screen_dims_after_closing_until_someone_touches_it(conn, clock, tmp_pat
         c.post("/api/wake")  # a touch
         dim_tick(app, night, app.state.last_touch + 1)
         assert level() == "255"
-        c.post("/api/session", json={"id_code": "ID-1001", "action": "out"})
+        pin_login(c, conn)
         dim_tick(app, night, app.state.last_touch + DIM_AFTER_SECONDS)
         assert level() == "255"  # a session in progress keeps it bright
     Backlight(str(tmp_path / "none")).dim(True)  # a screen with no backlight file: nothing to do, no error

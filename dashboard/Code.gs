@@ -7,7 +7,7 @@
 // Tabs staff edit here. key: the column that names a row. choices: allowed values. Supervisors only unless noted.
 var SCHEMA = {
   Tools: { key: 'asset_id', cols: ['asset_id', 'qr_code', 'name', 'category', 'spot_id', 'status', 'notes', 'serial', 'brand',
-    'model', 'needs_battery', 'battery_group_id', 'is_battery'],
+    'model', 'needs_battery', 'battery_group_id', 'is_battery', 'nfc_uid'],
     choices: { status: ['available', 'quarantined', 'retired'] } },
   People: { key: 'person_id', cols: ['person_id', 'id_code', 'name', 'role', 'email', 'active'],
     choices: { role: ['student', 'instructor', 'supervisor'] } },

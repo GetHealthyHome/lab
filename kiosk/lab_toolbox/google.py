@@ -223,7 +223,7 @@ class GoogleSink:
                 # Sheet status may say out/missing; locally those come from transactions and alerts, not this column.
                 status = t.get("status") if t.get("status") in ("quarantined", "retired") else "available"
                 cols = ("qr_code", "name", "category", "spot_id", "status", "notes", "serial", "brand", "model",
-                        "needs_battery", "battery_group_id", "is_battery")
+                        "needs_battery", "battery_group_id", "is_battery", "nfc_uid")
                 row = {c: (t.get(c) or None) for c in cols}
                 row.update(asset_id=t["asset_id"], qr_code=t["qr_code"], name=t["name"], status=status,
                            **{c: _truthy(t.get(c, "")) for c in TRUTHY_TOOL_FIELDS})
@@ -240,7 +240,8 @@ class GoogleSink:
                     " VALUES (:person_id, :id_code, :name, :role, :pin_hash, :active, :email)"
                     " ON CONFLICT(person_id) DO UPDATE SET id_code=excluded.id_code, name=excluded.name,"
                     " role=excluded.role, pin_hash=excluded.pin_hash, active=excluded.active, email=excluded.email",
-                    {"person_id": p["person_id"], "id_code": p["id_code"], "name": p["name"], "email": p.get("email") or None,
+                    # id_code: PIN login needs no badge, but the column must be unique and filled
+                    {"person_id": p["person_id"], "id_code": p.get("id_code") or p["person_id"], "name": p["name"], "email": p.get("email") or None,
                      "role": role if role in ("student", "instructor", "supervisor") else "student",
                      "pin_hash": p.get("pin_hash") or None,
                      # blank means active, as on the dashboard: only an explicit no switches a person off

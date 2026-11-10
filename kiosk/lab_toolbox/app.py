@@ -18,18 +18,14 @@ from pydantic import BaseModel
 from . import db, sync
 from .db import now_iso, setting
 from .hardware import Backlight, Buzzer
-from .reader import Watcher
+from .reader import Debouncer, Watcher
 from . import loans
 from .sessions import Kiosk, Rejected, kits_view
 
 log = logging.getLogger(__name__)
+QR_SECONDS = 60  # how long "Scan QR code instead" keeps the camera reading labels
 DIM_AFTER_SECONDS = 300  # after closing time the screen dims once nobody has touched or scanned for this long
 STATIC = Path(__file__).parent / "static"
-
-
-class StartBody(BaseModel):
-    id_code: str
-    action: str  # "out" | "in"
 
 
 class ScanBody(BaseModel):
@@ -76,9 +72,8 @@ class ForBody(BaseModel):
     action: str = "out"
 
 
-class EnrollBody(BaseModel):
+class PersonBody(BaseModel):
     person_id: str
-    code: str | None = None  # leave out to take the next scanned card
 
 
 class ExtendBody(BaseModel):
@@ -93,8 +88,9 @@ class ClearBody(BaseModel):
 
 
 def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = None,
-               backlight: Backlight | None = None) -> FastAPI:
-    """camera: anything with frame() and capture() (see hardware.PiGateCamera). With one, the app reads codes itself."""
+               backlight: Backlight | None = None, nfc=None) -> FastAPI:
+    """camera: anything with frame() and capture() (see hardware.PiGateCamera). nfc: anything with read() (see
+    nfc.Pn532Reader). With them, the app reads tool codes itself."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -119,10 +115,22 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
         app.state.last_touch = time.monotonic()
         app.state.last_saved = None
         app.state.last_event = None
+        app.state.qr_until = 0.0
         tasks = [asyncio.create_task(_idle_loop(app))]
         if cam is not None:
             app.state.kiosk.camera = cam
             tasks.append(asyncio.create_task(_scan_loop(app, cam)))
+        if nfc is not None or os.environ.get("NFC_READER") == "pn532":
+            try:
+                if nfc is None:
+                    from .nfc import Pn532Reader
+
+                    reader = Pn532Reader()
+                else:
+                    reader = nfc
+                tasks.append(asyncio.create_task(_nfc_loop(app, reader)))
+            except Exception:  # unwired or I2C off: the QR fallback still works
+                log.exception("NFC reader not available; running without it")
         yield
         for t in tasks:
             t.cancel()
@@ -148,7 +156,7 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
     async def screen():
         return FileResponse(STATIC / "index.html")
 
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")  # lab-logo.png, or a logo.png override
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")  # lab-mark.png, or a logo.png override
 
     @app.get("/api/session")
     async def get_session(request: Request):
@@ -156,7 +164,7 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
         s = kiosk.session
         return {
             "session": s and {"id": s.id, "action": s.action, "person": s.person["name"], "items": s.items,
-                              "pin": s.pin, "kits": _kits_named(kiosk, s),
+                              "kits": _kits_named(kiosk, s),
                               "started_by": s.override_by and s.override_by["name"],
                               # K12: which batteries fit each tool still waiting for one, and where the charged ones sit
                               "battery_options": {i["asset_id"]: kiosk._battery_options(i["needs_battery"])
@@ -169,11 +177,12 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
             "auto_saved": request.app.state.last_saved,
             # latest camera scan result, so the screen can flash green or red; `seq` changes on each one
             "last_event": request.app.state.last_event,
+            "qr": request.app.state.qr_until > time.monotonic(),  # camera reading printed labels right now
         }
 
     @app.post("/api/mode")
     async def mode(body: ModeBody, request: Request):
-        """The screen's Check out / Return buttons: which kind of session the next ID scan starts."""
+        """The screen's Check out / Return / Instructor buttons: what the next PIN does."""
         if body.action not in ("out", "in", "instructor"):
             raise Rejected("Choose Check out or Return")
         k(request).next_action = body.action
@@ -181,14 +190,14 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
 
     @app.post("/api/code")
     async def code(body: ScanBody, request: Request):
-        """Same path as a camera scan (ID or tool, with sound); also takes a USB barcode scanner's input."""
+        """Same path as an NFC tap or camera scan (with sound); also takes a USB barcode scanner's input."""
         return handle_code(request.app, body.code)
 
-    @app.post("/api/session")
-    async def start(body: StartBody, request: Request):
-        request.app.state.last_saved = None
-        kiosk = k(request)
-        return kiosk._started(kiosk.start(body.id_code, body.action))
+    @app.post("/api/qr")
+    async def qr(request: Request):
+        """The "Scan QR code instead" button: the gate camera reads printed labels for the next minute."""
+        request.app.state.qr_until = time.monotonic() + QR_SECONDS
+        return {"seconds": QR_SECONDS}
 
     @app.post("/api/session/scan")
     async def scan(body: ScanBody, request: Request):
@@ -196,8 +205,9 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
 
     @app.post("/api/pin")
     async def pin(body: PinBody, request: Request):
-        """K11: answers the PIN prompt on screen (a student's, or an instructor logging in)."""
-        return sounded(request.app, lambda: k(request).enter_pin(body.pin))
+        """PIN login: starts the Check out / Return session, or logs an instructor in."""
+        request.app.state.last_saved = None
+        return sounded(request.app, lambda: k(request).login(body.pin))
 
     @app.post("/api/session/remove")
     async def remove(body: AssetBody, request: Request):
@@ -251,9 +261,15 @@ def create_app(kiosk: Kiosk | None = None, camera=None, buzzer: Buzzer | None = 
     async def manual(body: AssetBody, request: Request):
         return sounded(request.app, lambda: k(request).add_by_asset(body.asset_id))
 
-    @app.post("/api/instructor/enroll")
-    async def enroll(body: EnrollBody, request: Request):
-        return k(request).enroll(body.person_id, body.code)
+    @app.post("/api/instructor/pin")
+    async def give_pin(body: PersonBody, request: Request):
+        """A new random PIN for this person, shown once on screen."""
+        return k(request).assign_pin(body.person_id)
+
+    @app.post("/api/instructor/link_tag")
+    async def link_tag(body: AssetBody, request: Request):
+        """The next NFC sticker tapped becomes this tool's."""
+        return k(request).link_tag(body.asset_id)
 
     @app.post("/api/instructor/extend")
     async def extend(body: ExtendBody, request: Request):
@@ -338,14 +354,10 @@ def sounded(app: FastAPI, act) -> dict:
 
 
 def _say(r: dict) -> str:
-    if r.get("pin") in ("check", "setup"):
-        return f"Hi, {r['person']}. " + ("Enter your PIN" if r["pin"] == "check" else "Choose a 4-digit PIN")
-    if "instructor_pin" in r:
-        return f"{r['name']}: " + ("enter your PIN" if r["instructor_pin"] == "check" else "choose a 4-digit PIN")
     if "instructor" in r:
         return f"Instructor mode: {r['instructor']}"
-    if "enroll" in r:
-        return f"Scan {r['enroll']}'s new card" if r.get("waiting") else f"Card linked to {r['enroll']}"
+    if "link" in r:
+        return f"Tap the new sticker on {r['link']}" if r.get("waiting") else f"Sticker linked to {r['link']}"
     if "person" in r and "id" in r:
         return f"Hi, {r['person']}"
     if "pieces" in r:
@@ -354,8 +366,6 @@ def _say(r: dict) -> str:
         return f"Added {r['name']}. Now scan a {r['battery_needed']['group']} battery"
     if r.get("paired_to"):
         return f"Battery paired with {r['paired_to']}"
-    if "pin" in r:
-        return f"Hi, {r['person']}"
     return f"Added {r.get('name', '')}".strip()
 
 
@@ -363,6 +373,9 @@ async def _scan_loop(app: FastAPI, camera):
     """Grab and decode on a worker thread; handle codes here on the event loop, so the Kiosk is only touched from one thread."""
     watcher = Watcher()
     while True:
+        if app.state.qr_until < time.monotonic():  # NFC is the normal way; printed labels only after the button
+            await asyncio.sleep(0.5)
+            continue
         try:
             frame = await asyncio.to_thread(camera.frame)
             codes = await asyncio.to_thread(watcher.feed, frame)
@@ -376,6 +389,23 @@ async def _scan_loop(app: FastAPI, camera):
             except Rejected:
                 pass  # already shown and buzzed
         await asyncio.sleep(watcher.pause())
+
+
+async def _nfc_loop(app: FastAPI, reader):
+    """Wait for a sticker on a worker thread; handle it here, like the camera loop. A sticker left on the reader counts once."""
+    debouncer = Debouncer()
+    while True:
+        try:
+            uid = await asyncio.to_thread(reader.read)
+        except Exception:  # a loose wire must not stop NFC for the rest of the day
+            log.exception("NFC read failed")
+            await asyncio.sleep(1)
+            continue
+        for c in debouncer.feed([uid] if uid else []):
+            try:
+                handle_code(app, c)
+            except Rejected:
+                pass  # already shown and buzzed
 
 
 async def _idle_loop(app: FastAPI):
