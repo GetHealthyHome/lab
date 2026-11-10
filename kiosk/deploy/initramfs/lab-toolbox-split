@@ -30,8 +30,13 @@ e2fsck -fy "$dev"
 # -f: the Pi has no clock this early, so resize2fs mistakes the fsck above for one older than the last mount
 resize2fs -f "$dev" "${size}G" || { log_failure_msg "resize2fs failed; data partition not made"; exit 0; }
 echo ",${size}GiB" | sfdisk -N 2 "$disk" || { log_failure_msg "sfdisk resize failed"; exit 0; }
-echo ",,L" | sfdisk --append "$disk" || { log_failure_msg "sfdisk append failed"; exit 0; }
+# a partition 3 without the LTDATA label is left over from an attempt that stopped half way
+[ -b "${disk}p3" ] && { sfdisk --delete "$disk" 3 || { log_failure_msg "sfdisk delete failed"; exit 0; }; }
+# explicit start: left to itself sfdisk fills the small gap before partition 1
+p2=/sys/class/block/${dev#/dev/}
+start=$(( ($(cat $p2/start) + $(cat $p2/size) + 2047) / 2048 * 2048 ))
+echo "$start,,L" | sfdisk --append "$disk" || { log_failure_msg "sfdisk append failed"; exit 0; }
 udevadm settle
 i=0; while [ ! -b "${disk}p3" ] && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
-mke2fs -F -t ext4 -L LTDATA "${disk}p3"
+lab-toolbox-mke2fs -F -t ext4 -L LTDATA "${disk}p3"
 log_end_msg
