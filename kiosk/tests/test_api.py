@@ -31,7 +31,8 @@ def test_screen_gets_battery_and_kit_piece_names(conn, clock):
     from lab_toolbox.seed import SCREEN_DEMO
     conn.executescript(SCREEN_DEMO)
     with TestClient(create_app(Kiosk(conn, "gate-1", clock=clock))) as c:
-        assert c.get("/static/lab-logo.png").status_code == 200
+        assert c.get("/static/lab-mark.png").status_code == 200
+        assert c.get("/static/fonts/material-symbols.woff2").status_code == 200
         assert c.get("/static/fonts/hanken-grotesk.woff2").status_code == 200  # fonts ship with the kiosk, no internet needed
         pin_login(c, conn)
         c.post("/api/session/scan", json={"code": "T-0003"})
