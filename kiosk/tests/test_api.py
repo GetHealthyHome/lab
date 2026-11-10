@@ -36,3 +36,11 @@ def test_screen_gets_battery_and_kit_piece_names(conn, clock):
         c.post("/api/session/scan", json={"code": "K-0001"})
         kit = c.get("/api/session").json()["session"]["kits"][0]
         assert [p["name"] for p in kit["waiting"]] == ["Flare tool", "Tubing cutter"]
+
+
+def test_starts_without_gate_camera_or_buzzer(conn, clock, monkeypatch):
+    # no picamera2/gpiozero here, like a Pi whose camera ribbon or buzzer isn't connected yet
+    monkeypatch.setenv("GATE_CAMERA", "pi")
+    monkeypatch.setenv("BUZZER_PIN", "18")
+    with TestClient(create_app(Kiosk(conn, "gate-1", clock=clock))) as c:
+        assert c.get("/api/health").status_code == 200
