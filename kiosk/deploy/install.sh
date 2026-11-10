@@ -19,7 +19,12 @@ say() { printf '\n== %s\n' "$*"; }
 
 # ---------- Run 1: the data partition ----------
 if ! blkid -L LTDATA >/dev/null 2>&1; then
-	grep -q labtoolbox_split "$CMDLINE" && echo "The data partition isn't there yet: setting it up again."
+	if grep -q labtoolbox_split "$CMDLINE"; then
+		echo "The data partition isn't there yet. What the startup step did last boot:"
+		cat /run/initramfs/lab-toolbox-split.log 2>/dev/null || echo "(no notes: the startup step didn't run)"
+		echo "Send a photo of the lines above, then press Enter to try again or Ctrl+C to stop."
+		read -r _
+	fi
 	disk_gb=$(($(lsblk -bndo SIZE /dev/mmcblk0) / 1024 ** 3))
 	[ "$disk_gb" -ge $((ROOT_GB + 6)) ] || { echo "The SD card is ${disk_gb} GB; use a 16 GB or bigger card."; exit 1; }
 	say "Step 1 of 2: making room for a data partition"

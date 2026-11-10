@@ -12,6 +12,10 @@ for arg in $(cat /proc/cmdline); do
 	case "$arg" in labtoolbox_split=*) size="${arg#labtoolbox_split=}" ;; esac
 done
 [ -n "$size" ] || exit 0
+# /run survives into the booted system, so install.sh can show this log if the step gives up
+mkdir -p /run/initramfs
+exec >>/run/initramfs/lab-toolbox-split.log 2>&1
+set -x
 
 wait_for_udev 10
 dev=$(resolve_device "$ROOT")
