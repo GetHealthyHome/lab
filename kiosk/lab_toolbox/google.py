@@ -16,6 +16,8 @@ from .sync import pending
 SHEETS = "https://sheets.googleapis.com/v4/spreadsheets"
 DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+# A person's sign-in is only asked for the files this app makes: all it needs, and all Google's device sign-in allows.
+DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
 # Outbox kind -> Sheet tab. "photo" goes to Drive instead.
 TABS = {"transaction": "Transactions", "snapshot": "Snapshots", "alert": "Alerts", "audit": "AuditLog",
@@ -40,17 +42,29 @@ class GoogleError(Exception):
 class GoogleSink:
     """Implements sync.Sink. Rows go under the tab's header row, matched by column name, so staff can reorder columns."""
 
-    def __init__(self, session, conn: sqlite3.Connection, sheet_id: str, folder_id: str):
+    def __init__(self, session, conn: sqlite3.Connection, sheet_id: str, folder_id: str, drive=None):
         self.http, self.conn, self.sheet_id, self.folder_id = session, conn, sheet_id, folder_id
+        self.drive = drive or session  # photo uploads can use a different sign-in from the Sheet's
         self._headers: dict[str, list[str]] = {}
 
     @classmethod
-    def from_service_account(cls, key_file: str, conn: sqlite3.Connection, sheet_id: str, folder_id: str) -> "GoogleSink":
+    def from_service_account(cls, key_file: str, conn: sqlite3.Connection, sheet_id: str, folder_id: str,
+                             user_file: str | None = None) -> "GoogleSink":
         from google.auth.transport.requests import AuthorizedSession
         from google.oauth2 import service_account
 
         creds = service_account.Credentials.from_service_account_file(key_file, scopes=SCOPES)
-        return cls(AuthorizedSession(creds), conn, sheet_id, folder_id)
+        drive = None
+        if user_file and os.path.exists(user_file):
+            # A service account has no Drive storage, so outside a Shared Drive its uploads are refused.
+            # drive_login leaves a person's sign-in here: photos go up as them, into the folder it made.
+            from google.oauth2.credentials import Credentials
+
+            with open(user_file) as f:
+                info = json.load(f)
+            drive = AuthorizedSession(Credentials.from_authorized_user_info(info, [DRIVE_FILE_SCOPE]))
+            folder_id = info["folder_id"]
+        return cls(AuthorizedSession(creds), conn, sheet_id, folder_id, drive)
 
     # -- push ---------------------------------------------------------------
 
@@ -84,7 +98,7 @@ class GoogleSink:
                 "metadata": (None, json.dumps(meta), "application/json"),
                 "file": (meta["name"], f, mimetypes.guess_type(path)[0] or "image/jpeg"),
             }
-            r = self.http.post(
+            r = self.drive.post(
                 DRIVE_UPLOAD,
                 params={"uploadType": "multipart", "fields": "id,webViewLink", "supportsAllDrives": "true"},
                 files=files,
