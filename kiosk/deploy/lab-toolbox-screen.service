@@ -1,6 +1,7 @@
 # Full-screen kiosk browser on the 7" touchscreen. Installed and enabled by install.sh
-# cage is a one-window display server: Chromium fills the screen, there is no desktop to escape to,
-# and switching to a text console with Ctrl+Alt+F-keys is off.
+# cage is a one-window display server: Chromium fills the screen and there is no desktop to escape to.
+# -s leaves Ctrl+Alt+F2 working: it shows a text login that needs the Pi password, the staff way in
+# where the network blocks SSH. Ctrl+Alt+F1 returns to the kiosk.
 [Unit]
 Description=Lab Toolbox screen (Chromium kiosk)
 After=systemd-user-sessions.service lab-toolbox-kiosk.service
@@ -24,7 +25,7 @@ ExecStartPre=-/bin/sh -c 'echo "Lab Toolbox is starting. Staff: Ctrl+Alt+F2 to l
 # Wait for the web service. If it isn't up after 60 s the browser doesn't start and systemd tries again:
 # the screen never opens on an error page, and the text console (password login) stays reachable to fix it
 ExecStartPre=/usr/bin/timeout 60 /bin/sh -c 'until curl -sf http://127.0.0.1:8000/api/health >/dev/null; do sleep 1; done'
-ExecStart=/usr/bin/cage -- /usr/local/bin/lab-toolbox-browser \
+ExecStart=/usr/bin/cage -s -- /usr/local/bin/lab-toolbox-browser \
   --kiosk --incognito --ozone-platform=wayland \
   --noerrdialogs --disable-infobars --no-first-run --disable-session-crashed-bubble \
   --disable-pinch --overscroll-history-navigation=0 --disable-features=Translate,TouchpadOverscrollHistoryNavigation \
