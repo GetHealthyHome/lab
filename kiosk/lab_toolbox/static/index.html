@@ -7,87 +7,107 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lab Toolbox</title>
 <style>
-:root { --bg:#0f172a; --panel:#1e293b; --line:#334155; --text:#f8fafc; --muted:#a5b4c8; --green:#15803d; --green-hi:#22c55e;
-        --red:#dc2626; --amber:#f59e0b; --blue:#2563eb; --tap:80px; /* 15 mm on the official 7" screen (about 5.2 px per mm) */
-        --ok-bg:#14532d; --bad-bg:#7f1d1d; --warn-bg:#78350f; --card-bg:#2a2312; --info-bg:#172554; --field:#020617; --overdue:#fca5a5; }
-/* Light look, picked by screen_theme on the dashboard's Settings page */
-:root[data-theme="light"] { --bg:#f1f5f9; --panel:#ffffff; --line:#cbd5e1; --text:#0f172a; --muted:#475569;
-        --ok-bg:#dcfce7; --bad-bg:#fee2e2; --warn-bg:#fef3c7; --card-bg:#fffbeb; --info-bg:#dbeafe; --field:#ffffff; --overdue:#b91c1c; }
+/* Look from Ande's mockups (Nov 10): graphite dark by default, Apple-style light via screen_theme. Fonts ship in static/fonts (SIL OFL), so no internet is needed. */
+@font-face { font-family:"Hanken Grotesk"; src:url(/static/fonts/hanken-grotesk.woff2) format("woff2"); font-weight:100 900; }
+@font-face { font-family:"JetBrains Mono"; src:url(/static/fonts/jetbrains-mono.woff2) format("woff2"); font-weight:100 800; }
+:root { --bg:#131315; --panel:#1c1c1e; --raised:#2c2c2e; --line:rgba(255,255,255,.12); --text:#f2f2f7; --muted:#a1a1aa;
+        --blue:#0a84ff; --on-blue:#fff; --green:#30d158; --on-green:#000; --red:#ff453a; --on-red:#fff; --amber:#ff9f0a; --on-amber:#000;
+        --tap:80px; /* 15 mm on the official 7" screen (about 5.2 px per mm) */
+        --mono:"JetBrains Mono", "DejaVu Sans Mono", monospace; --glow:0 0 22px; }
+/* Light look, picked by screen_theme on the dashboard's Settings page. Darker green/red keep white text readable. */
+:root[data-theme="light"] { --bg:#f5f5f7; --panel:#ffffff; --raised:#e5e5ea; --line:#d1d1d6; --text:#1d1d1f; --muted:#6e6e73;
+        --blue:#0071e3; --green:#248a3d; --on-green:#fff; --red:#d70015; --amber:#b25900; --on-amber:#fff; --glow:0 2px 10px; }
 * { box-sizing:border-box; margin:0; padding:0; }
 [hidden] { display:none !important; }
-html, body { height:100%; background:var(--bg); color:var(--text); font:24px/1.25 system-ui, "DejaVu Sans", sans-serif;
+html, body { height:100%; background:var(--bg); color:var(--text); font:500 24px/1.25 "Hanken Grotesk", system-ui, "DejaVu Sans", sans-serif;
              overflow:hidden; user-select:none; -webkit-user-select:none; touch-action:manipulation; cursor:none; }
 #app { position:fixed; inset:0; display:flex; flex-direction:column; }
-#app::after { content:""; position:absolute; inset:0; pointer-events:none; border:10px solid transparent; transition:border-color .15s; }
-#app.f-ok::after { border-color:var(--green-hi); } #app.f-bad::after { border-color:var(--red); } #app.f-warn::after { border-color:var(--amber); }
+#app::after { content:""; position:absolute; inset:0; pointer-events:none; border:10px solid transparent; border-radius:6px; transition:border-color .15s; }
+#app.f-ok::after { border-color:var(--green); } #app.f-bad::after { border-color:var(--red); } #app.f-warn::after { border-color:var(--amber); }
 #app.f-bad { animation:shake .3s; }
 @keyframes shake { 25% { transform:translateX(-8px); } 75% { transform:translateX(8px); } }
-header { height:56px; flex:none; display:flex; align-items:center; gap:12px; padding:0 18px; background:var(--panel); border-bottom:2px solid var(--line); }
-header img { height:46px; width:46px; object-fit:contain; background:#fff; border-radius:8px; padding:2px; }  /* white tile: the logo's black lettering must show on the dark look */
-header .t { flex:1; font-size:26px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.clock { color:var(--muted); font-size:22px; }
-main { flex:1; min-height:0; padding:14px 18px; display:flex; flex-direction:column; gap:12px; }
-button { font:inherit; font-weight:700; color:var(--text); background:var(--panel); border:3px solid var(--line); border-radius:14px;
-         min-height:var(--tap); min-width:var(--tap); padding:6px 14px; }
-button:active { filter:brightness(1.35); transform:scale(.97); }
-button.green { background:var(--green); border-color:var(--green-hi); } button.red { background:var(--red); border-color:#f87171; }
-button.blue { background:var(--blue); border-color:#60a5fa; } button.green, button.red, button.blue { color:#fff; } button.amber { background:var(--amber); border-color:#fcd34d; color:#111; }
-button.on { outline:5px solid var(--text); outline-offset:3px; }
-button.ghost { background:transparent; }
-button.sm { min-height:64px; font-size:22px; }
-h1 { font-size:40px; } h2 { font-size:28px; } .muted { color:var(--muted); } .small { font-size:20px; }
+header { height:56px; flex:none; display:flex; align-items:center; gap:12px; margin:8px 12px 0; padding:0 8px 0 6px; background:var(--panel); border:1px solid var(--line); border-radius:16px; }
+header img { height:42px; width:42px; object-fit:contain; background:#fff; border-radius:10px; padding:2px; }  /* white tile: the logo's black lettering must show on the dark look */
+header .t { flex:1; font-size:23px; font-weight:700; letter-spacing:-.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pill { display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 14px; border-radius:18px; background:var(--raised); font:600 18px var(--mono); white-space:nowrap; }
+.pill::before { content:""; width:10px; height:10px; border-radius:50%; background:var(--green); }
+.pill.off { color:var(--red); } .pill.off::before { background:var(--red); }
+.clock::before { display:none; }
+main { flex:1; min-height:0; padding:12px; display:flex; flex-direction:column; gap:12px; }
+button { font:inherit; font-weight:700; letter-spacing:-.01em; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:20px;
+         min-height:var(--tap); min-width:var(--tap); padding:6px 16px; transition:transform .08s, filter .08s; }
+button:active { filter:brightness(1.18); transform:scale(.97); }
+button.blue { background:var(--blue); color:var(--on-blue); } button.green { background:var(--green); color:var(--on-green); }
+button.red { background:var(--red); color:var(--on-red); } button.amber { background:var(--amber); color:var(--on-amber); }
+button.blue, button.green, button.red, button.amber { border-color:transparent; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+button.on { outline:4px solid var(--text); outline-offset:3px; }
+button.ghost { background:transparent; border-color:transparent; color:var(--muted); }
+button.sm { min-height:64px; font-size:21px; border-radius:16px; }
+h1 { font-size:36px; font-weight:800; letter-spacing:-.02em; } h2 { font-size:27px; font-weight:700; letter-spacing:-.01em; }
+.muted { color:var(--muted); } .small { font-size:19px; } .mono { font-family:var(--mono); }
 .row { display:flex; gap:12px; } .col { display:flex; flex-direction:column; gap:12px; } .grow { flex:1; min-width:0; min-height:0; }
 .scroll { overflow-y:auto; overscroll-behavior:contain; }
-.msg { flex:none; min-height:58px; display:flex; align-items:center; gap:12px; padding:8px 14px; border-radius:12px; font-size:26px; font-weight:700; background:var(--panel); }
-.msg.ok { background:var(--ok-bg); } .msg.bad { background:var(--bad-bg); } .msg.warn { background:var(--warn-bg); }
-.msg i { font-style:normal; font-size:30px; width:34px; text-align:center; }
+/* message bar: tinted card with a round colored badge */
+.msg { --c:var(--blue); flex:none; min-height:60px; display:flex; align-items:center; gap:14px; padding:8px 16px 8px 10px; border-radius:16px; font-size:24px; font-weight:700;
+       background:color-mix(in srgb, var(--c) 14%, var(--panel)); border:1px solid color-mix(in srgb, var(--c) 40%, transparent); }
+.msg.ok { --c:var(--green); } .msg.bad { --c:var(--red); } .msg.warn { --c:var(--amber); }
+.msg i { flex:none; font-style:normal; width:42px; height:42px; border-radius:50%; display:grid; place-items:center; font-size:26px; font-weight:800;
+         background:var(--c); color:#fff; box-shadow:var(--glow) color-mix(in srgb, var(--c) 45%, transparent); }
+.msg.ok i, .msg.warn i { color:var(--on-green); }
 /* start screen */
-.idle { flex:1; display:flex; gap:24px; padding:22px; }
-.idle .brand { width:300px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; }
-.idle .brand img { width:260px; height:300px; object-fit:contain; background:#fff; border-radius:24px; padding:14px; }
-.idle .prompt { font-size:30px; font-weight:700; min-height:84px; display:flex; align-items:center; }
-.idle .mode { flex:1; font-size:36px; min-height:110px; }
+.idle { flex:1; display:flex; gap:22px; padding:6px 10px 10px; min-height:0; }
+.idle .brand { width:290px; display:flex; align-items:center; justify-content:center; }
+.idle .brand img { width:270px; height:330px; object-fit:contain; background:#fff; border-radius:28px; padding:16px; box-shadow:0 8px 30px rgba(0,0,0,.3); }
+.idle .prompt { font-size:28px; font-weight:700; letter-spacing:-.01em; min-height:72px; display:flex; align-items:center; }
+.idle .mode { flex:1; font-size:36px; min-height:100px; border-radius:24px; }
 /* session */
-.items li { list-style:none; display:flex; align-items:center; gap:12px; min-height:var(--tap); padding:6px 6px 6px 16px; border-bottom:2px solid var(--line); }
+.items { display:flex; flex-direction:column; gap:8px; }
+.items li { list-style:none; display:flex; align-items:center; gap:12px; min-height:var(--tap); padding:6px 6px 6px 14px; background:var(--panel); border:1px solid var(--line); border-radius:16px; }
 .items li:first-child { animation:slide .35s ease-out; }
 @keyframes slide { from { transform:translateX(-40px); opacity:0; } }
-.items .n { font-size:26px; font-weight:700; } .items .d { font-size:19px; color:var(--muted); }
-.card { border:3px solid var(--amber); border-radius:12px; padding:10px 14px; background:var(--card-bg); }
-.card.blue { border-color:#60a5fa; background:var(--info-bg); }
+.items .n { font-size:25px; font-weight:700; } .items .d { font-size:17px; color:var(--muted); font-family:var(--mono); }
+.card { --c:var(--amber); border:2px solid var(--c); border-radius:16px; padding:10px 14px; background:color-mix(in srgb, var(--c) 12%, var(--panel)); }
+.card.blue { --c:var(--blue); } .card.green { --c:var(--green); }
 .chips { display:flex; flex-wrap:wrap; gap:10px; }
-.bar { flex:none; height:34px; border-radius:17px; background:var(--panel); position:relative; overflow:hidden; }
-.bar div { position:absolute; inset:0 auto 0 0; background:var(--green-hi); transition:width 1s linear; }
+.bar { flex:none; height:32px; border-radius:16px; background:var(--raised); position:relative; overflow:hidden; }
+.bar div { position:absolute; inset:0 auto 0 0; background:var(--green); opacity:.85; transition:width 1s linear; }
 .bar div.low { background:var(--amber); }
-.bar span { position:absolute; inset:0; text-align:center; font-size:20px; font-weight:700; line-height:34px; color:#fff; text-shadow:0 1px 3px #000; }
+.bar span { position:absolute; inset:0; text-align:center; font:700 17px/32px var(--mono); color:var(--text); }
 .side { width:236px; flex:none; }
-.side .done { flex:1; font-size:40px; }
-/* PIN pad */
-.pad { display:grid; grid-template-columns:repeat(3, 96px); gap:10px; }
-.pad button { font-size:34px; }
-.dots { display:flex; gap:18px; } .dots b { width:34px; height:34px; border-radius:50%; border:4px solid var(--text); }
-.dots b.f { background:var(--text); }
-/* summary and lock */
-.banner { background:var(--green); color:#fff; border-radius:14px; padding:10px 18px; display:flex; align-items:center; gap:16px; }
-.thumb { width:64px; height:64px; object-fit:cover; border-radius:8px; flex:none; background:#fff; }
-.banner .thumb { width:120px; height:120px; }
-.banner .what { font-size:22px; } .banner .where { font-size:34px; font-weight:800; letter-spacing:.5px; }
-.lock { flex:1; background:#7f1d1d; color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:20px; }
-.lock .big { font-size:72px; font-weight:800; font-variant-numeric:tabular-nums; }
+.side .done { flex:1; font-size:38px; border-radius:24px; }
+/* PIN pad: round keys like a phone */
+.pad { display:grid; grid-template-columns:repeat(3, 80px); gap:8px 16px; align-content:center; }
+.pad button { font-size:34px; border-radius:50%; height:80px; padding:0; background:var(--raised); }
+.pad button.red { border-radius:50%; background:transparent; color:var(--red); border:1px solid var(--line); box-shadow:none; }
+.dots { display:inline-flex; align-self:flex-start; gap:22px; padding:16px 26px; border-radius:40px; background:var(--panel); border:1px solid var(--line); }
+.dots b { width:26px; height:26px; border-radius:50%; background:var(--raised); transition:all .15s; }
+.dots b.f { background:var(--blue); transform:scale(1.15); box-shadow:var(--glow) color-mix(in srgb, var(--blue) 60%, transparent); }
+/* summary: big check, then cards */
+.badge { width:64px; height:64px; flex:none; border-radius:50%; display:grid; place-items:center; font-size:38px; font-weight:800; background:var(--green); color:var(--on-green);
+         box-shadow:0 0 0 10px color-mix(in srgb, var(--green) 22%, transparent), var(--glow) color-mix(in srgb, var(--green) 50%, transparent); }
+.tile { display:flex; align-items:center; gap:14px; padding:10px 14px; background:var(--panel); border:1px solid var(--line); border-radius:16px; }
+.tile .k { font:700 14px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+.tile .v { font-size:24px; font-weight:700; }
+.tile.due { border:2px solid var(--amber); background:color-mix(in srgb, var(--amber) 12%, var(--panel)); } .tile.due .k { color:var(--amber); }
+.tile .where { font:800 28px var(--mono); color:var(--green); letter-spacing:.02em; }
+.thumb { width:64px; height:64px; object-fit:cover; border-radius:12px; flex:none; background:#fff; }
+.tile .thumb { width:96px; height:96px; }
+.lock { flex:1; border-radius:24px; border:2px solid var(--red); background:color-mix(in srgb, var(--red) 18%, var(--bg));
+        display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; text-align:center; padding:12px; }
+.lock .big { font:800 60px var(--mono); color:var(--red); }
 /* on-screen keyboard (instructor and report screens only; normal checkouts never type) */
 .kb { display:grid; grid-template-columns:repeat(10, 1fr); gap:6px; flex:none; }
-.kb button { min-height:54px; min-width:0; padding:0; font-size:26px; border-radius:10px; }
+.kb button { min-height:54px; min-width:0; padding:0; font-size:25px; border-radius:12px; background:var(--raised); }
 .kb .w2 { grid-column:span 2; }
-.field { flex:1; min-height:56px; display:flex; align-items:center; padding:0 16px; border:3px solid var(--line); border-radius:12px; background:var(--field); font-size:28px; }
-.field:empty::before { content:attr(data-ph); color:var(--muted); }
+.field { flex:1; min-height:56px; display:flex; align-items:center; padding:0 16px; border:2px solid var(--blue); border-radius:14px; background:var(--panel); font:600 26px var(--mono); }
+.field:empty::before { content:attr(data-ph); color:var(--muted); font-family:"Hanken Grotesk", sans-serif; }
 .list-btn { width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:12px; }
-.overdue { color:var(--overdue); }
-.offline { position:fixed; bottom:6px; right:10px; font-size:18px; color:var(--muted); }
+.overdue { color:var(--red); }
 </style>
 </head>
 <body>
-<div id="app"><header id="hdr" hidden><img id="hlogo" alt="Lab logo"><div class="t" id="htitle"></div><div class="clock" id="clock"></div></header>
+<div id="app"><header id="hdr"><img id="hlogo" alt="Lab logo"><div class="t" id="htitle"></div><div class="pill clock" id="clock"></div><div class="pill" id="net">ONLINE</div></header>
 <main id="main"></main></div>
-<div class="offline" id="offline" hidden>Kiosk service not answering…</div>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -97,6 +117,7 @@ const time = iso => { const d = new Date(iso), today = d.toDateString() === new 
 const where = label => label ? label.toUpperCase().replace(/\s*,\s*/g, " — ") : "ASK AN INSTRUCTOR";
 const KEYS = "1234567890QWERTYUIOPASDFGHJKL-ZXCVBNM".split("");
 const TAGS = ["Cracked", "Broken part", "Won't power on", "Frayed cord", "Missing piece", "Dull or worn", "Leaking", "Bent"];
+const PIN_LEN = 4;  // the PIN/NFC work makes this 4 for students and 6 for staff
 const NOTES = ["Inspected, no damage", "Repaired", "Damage is cosmetic only"];
 
 let photos = {};  // asset_id -> version, for tools with a photo on this Pi
@@ -119,8 +140,8 @@ async function call(method, url, body) {
 const go = fn => Promise.resolve().then(fn).catch(() => {}).finally(poll);
 
 async function poll() {
-  try { st = await call("GET", "/api/session"); $("offline").hidden = true; }
-  catch { $("offline").hidden = false; return tick(); }
+  try { st = await call("GET", "/api/session"); net(true); }
+  catch { net(false); return tick(); }
   const ev = st.last_event;
   document.documentElement.dataset.theme = st.theme;
   if (lastSeq === null) lastSeq = ev ? ev.seq : 0;  // don't replay an old scan after a reload
@@ -132,6 +153,8 @@ async function poll() {
   if (!st.session && !st.instructor) ui.inst = null;
   render(); tick();
 }
+
+const net = up => { $("net").className = up ? "pill" : "pill off"; $("net").textContent = up ? "ONLINE" : "KIOSK SERVICE DOWN"; };
 
 // ---------- feedback: color + words on screen; the Pi's buzzer plays the sound ----------
 function feedback(ev) {
@@ -149,11 +172,11 @@ function flash(kind) {
 const say = (text, kind = "ok") => { ui.msg = {kind, text, at: Date.now()}; flash(kind); render(); };
 const msgBar = hint => {
   const m = ui.msg && Date.now() - ui.msg.at < 30000 ? ui.msg : null;
-  if (!m) return `<div class="msg"><i>›</i>${esc(hint)}</div>`;
+  if (!m) return `<div class="msg"><i>›</i><span>${esc(hint)}</span></div>`;
   const ev = m.ev || {};
   if (ev.kind === "wrong_battery")  // required and scanned battery side by side
     return `<div class="msg warn"><i>!</i><div class="grow">Wrong battery<div class="row small"><span class="grow">Needs: <b>${esc(ev.required)}</b></span><span class="grow">You scanned: <b>${esc(ev.scanned)}</b></span></div></div></div>`;
-  return `<div class="msg ${m.kind}"><i>${m.kind === "ok" ? "✓" : m.kind === "warn" ? "!" : "✕"}</i>${esc(m.text)}</div>`;
+  return `<div class="msg ${m.kind}"><i>${m.kind === "ok" ? "✓" : m.kind === "warn" ? "!" : "✕"}</i><span>${esc(m.text)}</span></div>`;
 };
 
 // ---------- screens ----------
@@ -192,10 +215,10 @@ function pinView(title, hint) {
   return [title, `<div class="row grow">
     <div class="col grow" style="justify-content:center;gap:22px">
       ${msgBar(hint)}
-      <div class="dots">${[0, 1, 2, 3].map(i => `<b class="${i < ui.pin.length ? "f" : ""}"></b>`).join("")}</div>
+      <div class="dots">${[...Array(PIN_LEN).keys()].map(i => `<b class="${i < ui.pin.length ? "f" : ""}"></b>`).join("")}</div>
       <p class="muted small">Hide the keypad with your other hand. Ask an instructor if you forgot your PIN.</p>
     </div>
-    <div class="pad">${keys.map(k => `<button class="${k === "Cancel" ? "sm red" : ""}" style="${k === "Cancel" ? "font-size:20px" : ""}" data-act="pin" data-arg="${k}">${k}</button>`).join("")}</div>
+    <div class="pad">${keys.map(k => `<button class="${k === "Cancel" ? "red" : ""}" style="${k === "Cancel" ? "font-size:19px" : ""}" aria-label="${k === "⌫" ? "Delete" : k}" data-act="pin" data-arg="${k}">${k}</button>`).join("")}</div>
   </div>`];
 }
 
@@ -237,21 +260,24 @@ function sessionView(s) {
 }
 
 function summaryView() {
-  const r = ui.summary, out = r.action === "out";
+  const r = ui.summary, out = r.action === "out", n = r.items.length;
   const short = (r.kits_short || []).map(k => `<div class="card"><b>${esc(k.name)}</b> came back without ${esc(k.missing.join(", "))}. An instructor has been told.</div>`).join("");
+  const head = `<div class="row" style="align-items:center;gap:22px;padding:4px 6px"><div class="badge">✓</div><div class="grow">
+      <h1>${out ? `${n} tool${n === 1 ? "" : "s"} checked out` : "Returned. Put each tool back here:"}</h1>
+      <div class="muted small">${out ? `Saved for ${esc(r.person)}.` : `Thanks, ${esc(r.person)}.`}</div></div></div>`;
   const body = out
-    ? `<div class="msg ok"><i>✓</i>Saved. ${r.items.length} tool${r.items.length === 1 ? "" : "s"} checked out to ${esc(r.person)}.</div>
-       ${r.due_at ? `<h2>Due back by ${esc(time(r.due_at))}</h2>` : ""}
-       <div class="grow scroll col">${r.items.map(i => `<div class="n" style="font-size:26px">• ${esc(i.name)}</div>`).join("")}</div>`
-    : `<div class="msg ok"><i>✓</i>Returned. Put each tool back here:</div>
-       <div class="grow scroll col">${short}${r.items.map(i => `<div class="banner">${thumb(i.asset_id)}<div><div class="what">${esc(i.name)}</div><div class="where">RETURN TO: ${esc(where(i.return_to))}</div></div></div>`).join("")}</div>`;
-  return [out ? "Checkout saved" : "Return saved", `${body}<button class="green" data-act="closesum">OK</button>`];
+    ? `${r.due_at ? `<div class="tile due"><div class="badge" style="width:44px;height:44px;font-size:24px;background:var(--amber);box-shadow:none;color:var(--on-amber)">⏱</div>
+         <div><div class="k">Return by</div><div class="v mono">${esc(time(r.due_at))}</div></div></div>` : ""}
+       <div class="grow scroll col" style="gap:8px">${r.items.map(i => `<div class="tile">${thumb(i.asset_id, "width:52px;height:52px")}<div><div class="v">${esc(i.name)}</div><div class="k">${esc(i.asset_id)}</div></div></div>`).join("")}</div>`
+    : `<div class="grow scroll col" style="gap:8px">${short}${r.items.map(i => `<div class="tile">${thumb(i.asset_id)}<div class="grow"><div class="v">${esc(i.name)}</div>
+         <div class="k" style="margin-top:4px">Return to</div><div class="where">${esc(where(i.return_to))}</div></div></div>`).join("")}</div>`;
+  return [out ? "Checkout saved" : "Return saved", `${head}${body}<button class="green" data-act="closesum">Done <span class="small mono" id="sumleft"></span></button>`];
 }
 
 function lockedView() {
-  return [null, `<div class="lock"><div style="font-size:64px">🔒</div><h1>ID locked</h1><div>${esc(ui.locked.text)}</div>
+  return [null, `<div class="lock"><div class="badge" style="background:var(--red);color:#fff;box-shadow:0 0 0 10px color-mix(in srgb, var(--red) 25%, transparent)">✕</div><h1>ID locked</h1><div>${esc(ui.locked.text)}</div>
     <div class="big" id="lockleft"></div><div class="small">Ask an instructor if you need a tool now.</div>
-    <button class="sm" data-act="closelock">OK</button></div>`];
+    <button class="sm" style="min-width:200px" data-act="closelock">OK</button></div>`];
 }
 
 // Report a problem (K8, K14, K15): from any screen, no typing needed when the tool is in your list.
@@ -339,12 +365,11 @@ function picker(back, ph, results, item, extra = "") {
 // ---------- drawing ----------
 function render() {
   const [title, body] = view();
-  $("hdr").hidden = title === null;
-  $("htitle").textContent = title || "";
+  $("hlogo").hidden = title === null;  // the start screen already shows the big logo
+  $("htitle").textContent = title ?? "Tool checkout";
   $("hlogo").src = logo;
   const html = body;
   if (html !== lastHtml) { $("main").innerHTML = html; lastHtml = html; }
-  $("main").style.padding = title === null ? "0" : "";
   tick();
 }
 function tick() {
@@ -356,6 +381,7 @@ function tick() {
     fill.className = left <= 10 ? "low" : "";
     $("secs").textContent = left <= 15 ? `Saving in ${left} s. Scan or tap to keep going.` : `${left} s`;
   }
+  if (ui.summary && $("sumleft")) $("sumleft").textContent = `· closes in ${Math.max(0, Math.ceil((ui.sumUntil - Date.now()) / 1000))} s`;
   if (ui.locked && $("lockleft")) {
     const ms = Math.max(0, new Date(ui.locked.until) - Date.now()), m = Math.floor(ms / 60000), sec = Math.floor(ms / 1000) % 60;
     $("lockleft").textContent = `${m}:${String(sec).padStart(2, "0")}`;
@@ -365,7 +391,8 @@ function tick() {
 }
 function showSummary(r) {
   ui.summary = r; ui.msg = null; flash("ok");
-  clearTimeout(ui.sumTimer); ui.sumTimer = setTimeout(() => { ui.summary = null; render(); }, r.action === "in" ? 25000 : 12000);
+  const ms = r.action === "in" ? 25000 : 12000; ui.sumUntil = Date.now() + ms;
+  clearTimeout(ui.sumTimer); ui.sumTimer = setTimeout(() => { ui.summary = null; render(); }, ms);
 }
 
 // ---------- buttons ----------
@@ -383,9 +410,9 @@ const acts = {
   mode: a => go(() => call("POST", "/api/mode", {action: a}).then(() => { ui.msg = null; })),
   pin: k => {
     if (k === "Cancel") { ui.pin = ""; return go(() => st.instructor_pin ? call("POST", "/api/instructor/logout") : call("DELETE", "/api/session")); }
-    ui.pin = k === "⌫" ? ui.pin.slice(0, -1) : (ui.pin + k).slice(0, 4);
+    ui.pin = k === "⌫" ? ui.pin.slice(0, -1) : (ui.pin + k).slice(0, PIN_LEN);
     render();
-    if (ui.pin.length === 4) { const pin = ui.pin; ui.pin = ""; go(() => call("POST", "/api/pin", {pin})); }
+    if (ui.pin.length === PIN_LEN) { const pin = ui.pin; ui.pin = ""; go(() => call("POST", "/api/pin", {pin})); }
   },
   remove: id => go(() => call("POST", "/api/session/remove", {asset_id: id}).then(() => say("Removed from your list"))),
   done: () => go(async () => {

@@ -25,6 +25,7 @@ def test_screen_gets_battery_and_kit_piece_names(conn, clock):
     conn.executescript(SCREEN_DEMO)
     with TestClient(create_app(Kiosk(conn, "gate-1", clock=clock))) as c:
         assert c.get("/static/lab-logo.png").status_code == 200
+        assert c.get("/static/fonts/hanken-grotesk.woff2").status_code == 200  # fonts ship with the kiosk, no internet needed
         c.post("/api/session", json={"id_code": "ID-1001", "action": "out"})
         c.post("/api/session/scan", json={"code": "T-0003"})
         s = c.get("/api/session").json()["session"]
